@@ -27,7 +27,7 @@ export function makeMaps(): WorldMaps {
   };
 }
 
-export const OUT = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5, vertical: 6 };
+export const OUT = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5, vertical: 6, collect: 7, build: 8 };
 
 /** cérebro sem pesos, só com os vieses das saídas: comportamento fixo */
 export function fixedBrain(bias: Partial<Record<keyof typeof OUT, number>>): Brain {
@@ -35,7 +35,7 @@ export function fixedBrain(bias: Partial<Record<keyof typeof OUT, number>>): Bra
   b.w1.fill(0);
   b.w2.fill(0);
   const NH = BRAIN_SHAPE.hidden;
-  const all = { turn: 0, speed: -5, eat: -5, drink: -5, sleep: -5, mate: -5, vertical: 0, ...bias };
+  const all = { turn: 0, speed: -5, eat: -5, drink: -5, sleep: -5, mate: -5, vertical: 0, collect: -5, build: -5, ...bias };
   for (const [k, v] of Object.entries(all)) b.w2[OUT[k as keyof typeof OUT] * (NH + 1) + NH] = v;
   return b;
 }

@@ -21,6 +21,11 @@ import { makeChild, mutateGenes, mutatedCopy, type Genes, type Genome } from './
 import { BRAIN_SHAPE, SPECIES, SPECIES_COUNT, type Species, type SpeciesConfig } from './species';
 import { ALGAE_ENERGY, BROWSE_ENERGY, FRUIT_ENERGY, GRASS_ENERGY, Plants, type Bush } from './plants';
 import { SimWorld, type WorldMaps } from './simWorld';
+import {
+  BUILDINGS, FISH_MAX, LEVEL_KNOWLEDGE, RESOURCES, SPLIT_SIZE, TRIBE_NAMES, canAfford, levelFor, nextBuilding,
+  neededResource, planBuilding, type Tribe,
+} from './tribes';
+import { dateLabel } from './clock';
 
 /** duração de um passo de simulação (s). 5 passos por segundo de simulação. */
 export const DT = 0.2;
@@ -29,6 +34,10 @@ const TURN_RATE = 3; // rad/s com a saída "virar" no máximo
 /** o chamado de acasalamento é ouvido a MATE_CALL × visão */
 const MATE_CALL = 3;
 const STATS_EVERY = 10; // s de simulação entre amostras dos gráficos
+
+const HUMAN = 6; // Species.HUMAN
+/** quanto um humano carrega antes de voltar ao centro da tribo */
+const CARRY = 5;
 
 /** HUNTS[a][b] = a espécie a caça a espécie b */
 const HUNTS: boolean[][] = SPECIES.map((p) => SPECIES.map((q) => p.prey.includes(q.id)));
@@ -105,6 +114,20 @@ export interface Creature {
   nursing: boolean;
   /** (pássaros) pousado num galho ou no chão; voando = false */
   landed: boolean;
+  // ---- só humanos ----
+  /** índice da tribo (-1 = nenhuma) */
+  tribe: number;
+  /** quanto está carregando e de qual recurso (índice em RESOURCES) */
+  carry: number;
+  carryRes: number;
+  /** tarefa de coleta atual: recurso (-1 = nenhum) e onde */
+  taskRes: number;
+  taskX: number;
+  taskZ: number;
+  taskTimer: number;
+  gatherAcc: number;
+  /** trabalhando (coletando) neste passo, para a animação */
+  working: boolean;
   attackCd: number;
   /** camuflagem atual (cor do corpo contra o chão onde está), 0..1 */
   camo: number;
@@ -206,6 +229,16 @@ export class Simulation {
   private extinct = new Array(SPECIES_COUNT).fill(false);
   /** total de caçadas bem-sucedidas por espécie de predador */
   readonly kills = new Array(SPECIES_COUNT).fill(0);
+  /** tribos humanas (índice = id) */
+  readonly tribes: Tribe[] = [];
+  /** blocos que as construções colocaram e a tela ainda não recebeu: [x, y, z, bloco, ...] */
+  pendingEdits: number[] = [];
+  /** todos os blocos já colocados (para salvar/recarregar o mundo) */
+  readonly allEdits: number[] = [];
+  private readonly usedCells = new Set<number>();
+  private readonly firstBuilt = new Set<string>();
+  private tribeTimer = 0;
+  private night = 0;
 
   // grade espacial das criaturas (células de 8×8 blocos), lista ligada em arrays
   private readonly GRID = 8;
@@ -226,7 +259,8 @@ export class Simulation {
       let n = Math.round(cfg.initialCount * this.opts.initialScale);
       while (n > 0) {
         const size = Math.min(n, cfg.groupSize);
-        this.spawnGroup(cfg.id, size, () => null);
+        if (cfg.id === HUMAN) this.foundTribe(size, () => null);
+        else this.spawnGroup(cfg.id, size, () => null);
         n -= size;
       }
     }
@@ -262,6 +296,7 @@ export class Simulation {
       maturity: (0.15 * g.maxAge) / Math.sqrt(g.metabolism),
       generation: 1, mother: 0, father: 0, children: 0, childIds: [],
       sleeping: false, eating: false, drinking: false, wantsMate: false, courting: false, attacking: false, nursing: false, landed: false, attackCd: 0, camo: 0,
+      tribe: -1, carry: 0, carryRes: 0, taskRes: -1, taskX: 0, taskZ: 0, taskTimer: 0, gatherAcc: 0, working: false,
       pregnant: null, cooldown: 0,
       alive: true, cause: null,
       input: new Float32Array(BRAIN_SHAPE.inputs),
@@ -312,8 +347,8 @@ export class Simulation {
    * Espalhados pelo mapa, eles quase nunca se encontrariam para acasalar.
    * `genome(k)` devolve o genoma do k-ésimo (null = aleatório).
    */
-  spawnGroup(species: Species, n: number, genome: (k: number) => Genome | null): Creature[] {
-    const center = this.homeCell(species);
+  spawnGroup(species: Species, n: number, genome: (k: number) => Genome | null, at = -1): Creature[] {
+    const center = at >= 0 ? at : this.homeCell(species);
     const out: Creature[] = [];
     if (center < 0) return out;
     const w = this.world;
@@ -345,6 +380,7 @@ export class Simulation {
     this.tick++;
     const daylight = daylightAt(this.time);
     const night = 1 - daylight;
+    this.night = night;
 
     this.buildGrid();
     const born: Creature[] = [];
@@ -365,6 +401,10 @@ export class Simulation {
     if ((this.grassTimer += dt) >= 5) {
       this.plants.updateGrass(this.grassTimer, daylight);
       this.grassTimer = 0;
+    }
+    if ((this.tribeTimer += dt) >= 1) {
+      this.updateTribes(this.tribeTimer);
+      this.tribeTimer = 0;
     }
     if ((this.bushTimer += dt) >= 1) {
       this.plants.updateBushes(this.bushTimer, this.rng);
@@ -398,6 +438,9 @@ export class Simulation {
     // e corpo grande demora a perder calor: sofre mais no calor
     const comfortMax = 30 - 12 * g.fur - 6 * (g.size - 1);
     c.coldStress = clamp((comfortMin - T) / 10, 0, 2);
+    // fogueira aquece quem está perto dela (humanos)
+    // (e quem dorme num abrigo também fica protegido do frio)
+    if (c.species === HUMAN && c.coldStress > 0 && (this.nearFire(c, 10) || (c.sleeping && this.inShelter(c)))) c.coldStress = 0;
     const heat = clamp((T - comfortMax) / 10, 0, 2);
 
     // camuflagem: cor do corpo contra a cor do chão onde está agora
@@ -423,6 +466,7 @@ export class Simulation {
     c.eating = false;
     c.drinking = false;
     c.attacking = false;
+    c.working = false;
     if (c.attackCd > 0) c.attackCd -= dt;
     let v = 0;
     if (!c.sleeping) {
@@ -441,6 +485,9 @@ export class Simulation {
       } else if (c.age < c.maturity * 0.5 && this.followMother(c, dt)) {
         // filhote pequeno longe da mãe vai atrás dela (reflexo inato)
         sp = Math.max(sp, g.speed * 0.9);
+      } else if (c.species === HUMAN && c.age >= c.maturity && this.humanWork(c, dt)) {
+        // trabalho (cultura): vai até o recurso, coleta, leva ao centro, constrói
+        sp = c.working ? 0 : Math.max(sp, g.speed * 0.7);
       } else {
         c.yaw += out[0] * TURN_RATE * dt;
       }
@@ -477,7 +524,8 @@ export class Simulation {
     c.energy -= burn * dt;
     if (medium === 'water') c.hydration = 1; // peixe não passa sede
     else c.hydration -= (dt / 600) * (1 + heat) * (v > 0.5 ? 1.2 : 1);
-    if (c.sleeping) c.fatigue -= (dt / 170) * g.metabolism;
+    // dormir num abrigo da tribo descansa mais rápido
+    if (c.sleeping) c.fatigue -= (dt / 170) * g.metabolism * (c.species === HUMAN && this.inShelter(c) ? 1.6 : 1);
     else c.fatigue += (dt / 650) * (1 + (0.5 * v) / g.speed) * (1 + 0.4 * night);
     c.fatigue = clamp(c.fatigue, 0, 1);
     if (c.cooldown > 0) c.cooldown -= dt;
@@ -518,7 +566,12 @@ export class Simulation {
     const g = c.genome.genes;
     const w = this.world;
     // à noite enxerga metade; dormindo, quase nada (só o que está bem perto)
-    const vision = g.vision * (1 - 0.5 * night) * (c.sleeping ? 0.3 : 1);
+    let vision = g.vision * (1 - 0.5 * night) * (c.sleeping ? 0.3 : 1);
+    // torre de vigia: humanos perto do centro enxergam 50% mais longe
+    if (c.tribe >= 0) {
+      const tr = this.tribes[c.tribe];
+      if (tr.tower && (tr.cx - c.x) ** 2 + (tr.cz - c.z) ** 2 < 400) vision *= 1.5;
+    }
     const t = c.targets;
     const carnivore = c.cfg.diet === 'meat';
 
@@ -734,6 +787,16 @@ export class Simulation {
    */
   private tryHunt(c: Creature, dt: number): void {
     const t = c.targets;
+    // humano com fome perto do centro come da reserva da tribo (1 comida = 30 de energia)
+    if (c.tribe >= 0 && c.energy < c.maxEnergy * 0.6) {
+      const tr = this.tribes[c.tribe];
+      if (tr.store.food >= 1 && (tr.cx - c.x) ** 2 + (tr.cz - c.z) ** 2 < 36 && this.rng.next() < dt) {
+        tr.store.food -= 1;
+        c.energy = Math.min(c.maxEnergy, c.energy + 30);
+        c.eating = true;
+        return;
+      }
+    }
     const reach = 1.2 + c.genome.genes.size * 0.5;
     const k = t.carcass;
     if (k && k.meat > 0 && (k.x - c.x) ** 2 + (k.z - c.z) ** 2 <= reach * reach) {
@@ -772,6 +835,17 @@ export class Simulation {
     });
     let chance = ATTACK_BASE * Math.sqrt(c.mass / p.mass) + PACK_BONUS * Math.min(3, pack);
     if (p.sleeping) chance += 0.4;
+    // fogueira afasta predadores à noite (vale para quem está perto dela)
+    if (this.night > 0.3 && c.species !== HUMAN && this.nearFire(p, 7)) return true;
+    if (p.species === HUMAN) {
+      // humano dormindo no abrigo está protegido; em grupo, eles se defendem
+      if (p.sleeping && this.inShelter(p)) return true;
+      let guards = 0;
+      this.forNear(p.x, p.z, 5, (o) => {
+        if (o !== p && o.species === HUMAN && o.alive && !o.sleeping && (o.x - p.x) ** 2 + (o.z - p.z) ** 2 <= 25) guards++;
+      });
+      chance -= 0.25 * guards;
+    }
     if (this.rng.next() >= Math.min(0.95, chance)) return true;
     this.kill(p, 'predação');
     this.kills[c.species]++;
@@ -890,6 +964,9 @@ export class Simulation {
     const ni = w.idx(nx, nz);
     if (ni !== i) {
       if (w.isWater(ni)) return;
+      // paredes bloqueiam todos; cerca bloqueia só os animais
+      const st = w.structure[ni];
+      if (st === 2 || (st === 1 && c.species !== HUMAN)) return;
       const dh = w.maps.height[ni] - w.maps.height[i];
       if (dh > c.cfg.maxStep || dh < -3) return;
     }
@@ -937,6 +1014,7 @@ export class Simulation {
         clamp(mother.z + this.rng.gauss() * 0.6, 1, this.world.sz - 2), {
           generation: Math.max(mother.generation, p.fatherGen) + 1,
           mother: mother.id, father: p.fatherId,
+          tribe: mother.tribe, // filhos herdam a tribo (e o conhecimento dela)
         });
       if (!child) break;
       child.energy = Math.min(child.maxEnergy, invest / n);
@@ -984,6 +1062,10 @@ export class Simulation {
       if (count >= 6) continue;
       // 2 bandos de 8: 6 de cada bando vêm dos melhores genomas guardados, 2 são aleatórios (diversidade)
       const hall = this.hall[cfg.id];
+      if (cfg.id === HUMAN) {
+        this.foundTribe(8, (k) => (hall.length > 0 && k < 6 ? mutatedCopy(hall[k % hall.length].genome, this.rng, this.opts.mutationRate) : null));
+        continue;
+      }
       for (let grp = 0; grp < 2; grp++) {
         const made = this.spawnGroup(cfg.id, 8, (k) =>
           hall.length > 0 && k < 6 ? mutatedCopy(hall[(k + grp * 6) % hall.length].genome, this.rng, this.opts.mutationRate) : null);
@@ -991,6 +1073,272 @@ export class Simulation {
       }
       this.events.push({ t: this.time, text: `Repovoamento: ${cfg.plural.toLowerCase()} quase extintos` });
     }
+  }
+
+  // ------------------------------------------------------------------
+  // humanos e tribos
+  // ------------------------------------------------------------------
+
+  /**
+   * Funda uma tribo: escolhe um lugar bom (chão com grama, água perto, árvores e
+   * pedra ao alcance, longe das outras tribos) e solta o grupo lá.
+   */
+  foundTribe(n: number, genome: (k: number) => Genome | null, migrants: Creature[] = []): Tribe | null {
+    const w = this.world;
+    let best = -1, bestScore = -Infinity;
+    for (let t = 0; t < 250; t++) {
+      const i = this.homeCell(HUMAN as Species);
+      if (i < 0) break;
+      const x = i % w.sx, z = (i / w.sx) | 0;
+      if (x < 15 || z < 15 || x > w.sx - 15 || z > w.sz - 15) continue; // longe das bordas do mapa
+      // quem migra não vai para o outro lado do mapa
+      if (migrants.length && Math.hypot(migrants[0].x - x, migrants[0].z - z) > 160) continue;
+      if (this.tribes.some((tr) => tr.alive && Math.hypot(tr.cx - x, tr.cz - z) < 90)) continue;
+      const wi = w.nearestWater[i];
+      const dw = wi < 0 ? 99 : Math.hypot((wi % w.sx) - x, ((wi / w.sx) | 0) - z);
+      if (dw < 4) continue; // não colado na água
+      // árvores ao alcance (madeira) são boas; árvores em cima do lugar da vila, não
+      let trees = 0, crowded = 0;
+      for (const tr of w.maps.trees) {
+        if (Math.abs(tr.x - x) < 30 && Math.abs(tr.z - z) < 30) trees++;
+        if (Math.abs(tr.x - x) < 12 && Math.abs(tr.z - z) < 12) crowded++;
+      }
+      let stoneD = 99;
+      for (let k = 0; k < w.stoneCells.length; k += 7) {
+        const s = w.stoneCells[k];
+        stoneD = Math.min(stoneD, Math.hypot((s % w.sx) - x, ((s / w.sx) | 0) - z));
+      }
+      const score = -dw * 2 + Math.min(trees, 30) - crowded * 3 - Math.max(0, stoneD - 30) * 0.5;
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    if (best < 0) return null;
+    const cx = best % w.sx, cz = (best / w.sx) | 0;
+    const info = TRIBE_NAMES[this.tribes.length % TRIBE_NAMES.length];
+    const tribe: Tribe = {
+      id: this.tribes.length, name: info.name, color: info.color, cx, cz, founded: this.time,
+      knowledge: 0, level: 0, store: { wood: 0, stone: 0, food: 20, fiber: 0 }, built: [], alive: true, members: n,
+      trees: w.maps.trees.map((t) => t.x + t.z * w.sx)
+        .sort((a, b) => Math.hypot((a % w.sx) - cx, ((a / w.sx) | 0) - cz) - Math.hypot((b % w.sx) - cx, ((b / w.sx) | 0) - cz))
+        .slice(0, 40),
+      // as 30 rochas mais próximas (mesmo que longe: buscar pedra pode exigir viagem)
+      stones: Array.from(w.stoneCells)
+        .sort((a, b) => Math.hypot((a % w.sx) - cx, ((a / w.sx) | 0) - cz) - Math.hypot((b % w.sx) - cx, ((b / w.sx) | 0) - cz))
+        .slice(0, 30),
+      water: w.nearestWater[best],
+      fire: null, shelters: [], dock: null, farms: 0, tower: false, fish: FISH_MAX,
+    };
+    this.tribes.push(tribe);
+    if (migrants.length) {
+      // divisão: os migrantes levam a cultura (80% do conhecimento) e vão andando até o novo centro
+      for (const c of migrants) { c.tribe = tribe.id; c.carry = 0; c.taskRes = -1; }
+    } else {
+      for (const c of this.spawnGroup(HUMAN as Species, n, genome, best)) c.tribe = tribe.id;
+      this.events.push({ t: this.time, text: `Fundada a tribo ${tribe.name}` });
+    }
+    return tribe;
+  }
+
+  /** a cada segundo: membros, conhecimento, nível, plantações e extinção */
+  private updateTribes(dt: number): void {
+    const counts = new Array(this.tribes.length).fill(0);
+    for (const c of this.creatures) if (c.tribe >= 0 && c.alive) counts[c.tribe]++;
+    for (const t of this.tribes) {
+      if (!t.alive) continue;
+      t.members = counts[t.id];
+      if (t.members === 0) {
+        t.alive = false;
+        this.events.push({ t: this.time, text: `A tribo ${t.name} desapareceu` });
+        continue;
+      }
+      // conhecimento cresce com o tempo, o tamanho do grupo e as construções
+      t.knowledge += dt * 0.0035 * t.members ** 0.7 * (1 + 0.15 * t.built.length);
+      const lv = levelFor(t.knowledge);
+      if (lv > t.level) {
+        t.level = lv;
+        const unlocked = BUILDINGS.filter((b) => b.level === lv).map((b) => b.name).join(' e ');
+        this.events.push({ t: this.time, text: `Tribo ${t.name} chegou ao nível ${lv}: aprendeu a fazer ${unlocked}` });
+      }
+      // cada plantação rende 1 comida a cada 5 s; os peixes do cais se renovam devagar
+      t.store.food += (t.farms * dt) / 5;
+      if (t.dock) t.fish = Math.min(FISH_MAX, t.fish + dt * 0.15);
+      // grande demais: 10 membros adultos saem e fundam uma tribo nova
+      if (t.members > SPLIT_SIZE) this.splitTribe(t);
+    }
+  }
+
+  /**
+   * Camada de TRABALHO dos humanos (cultura). O cérebro decide QUANDO
+   * (saídas "coletar" e "construir"); aqui se decide O QUE e COMO.
+   * Devolve true se assumiu o controle do movimento neste passo.
+   */
+  private humanWork(c: Creature, dt: number): boolean {
+    const t = this.tribes[c.tribe];
+    if (!t || !t.alive) return false;
+    const out = c.output;
+    const collect = out[7] > 0, build = out[8] > 0;
+    const dc2 = (t.cx + 0.5 - c.x) ** 2 + (t.cz + 0.5 - c.z) ** 2;
+    // chegou ao centro: deposita o que carrega e, se quiser, constrói
+    // (depois de depositar, reavalia o que a tribo mais precisa)
+    if (c.carry > 0 && dc2 < 16) { t.store[RESOURCES[c.carryRes]] += c.carry; c.carry = 0; c.taskRes = -1; }
+    // constrói se o cérebro quiser (ou ao menos não recusar com força, quando acabou de trazer recursos)
+    if ((build || out[8] > -0.3) && dc2 < 36) this.tryBuild(t);
+    // necessidades urgentes vêm antes do trabalho
+    if (c.energy < c.maxEnergy * 0.25 || c.hydration < 0.25 || c.targets.pred) return false;
+    if (c.carry >= CARRY || (c.carry > 0 && !collect)) return this.steerTo(c, t.cx + 0.5, t.cz + 0.5, dt);
+    if (!collect) return false;
+    if (c.taskRes < 0 || c.taskTimer > 45) this.pickTask(c, t);
+    if (c.taskRes < 0) return false; // nada a coletar (ex.: comida e nenhum arbusto): o cérebro caça
+    c.taskTimer += dt;
+    if ((c.taskX - c.x) ** 2 + (c.taskZ - c.z) ** 2 > 2.2 * 2.2) return this.steerTo(c, c.taskX, c.taskZ, dt);
+    // no lugar: coletando
+    c.working = true;
+    c.gatherAcc += dt;
+    if (c.gatherAcc >= (RESOURCES[c.taskRes] === 'stone' ? 3 : 2)) {
+      c.gatherAcc = 0;
+      if (this.gather(c, t)) {
+        if (c.carry > 0 && c.carryRes !== c.taskRes) c.carry = 0; // (não mistura recursos)
+        c.carry++;
+        c.carryRes = c.taskRes;
+        c.taskTimer = 0;
+      } else c.taskRes = -1;
+    }
+    return true;
+  }
+
+  /** escolhe o que coletar (o que mais falta para a próxima construção) e onde */
+  private pickTask(c: Creature, t: Tribe): void {
+    const w = this.world;
+    const res = neededResource(t);
+    c.taskTimer = 0;
+    c.taskRes = -1;
+    const cell = (i: number) => { c.taskX = (i % w.sx) + 0.5; c.taskZ = ((i / w.sx) | 0) + 0.5; };
+    if (res === 'wood' && t.trees.length) {
+      const i = t.trees[this.rng.int(0, Math.min(t.trees.length, 12) - 1)];
+      cell(i);
+      c.taskX += 1; // ao lado do tronco
+    } else if (res === 'stone' && t.stones.length) {
+      cell(t.stones[this.rng.int(0, Math.min(t.stones.length, 10) - 1)]);
+    } else if (res === 'fiber') {
+      // fibra: capim alto por perto ou, se não houver, cipós das árvores
+      if (!this.grassSpot(c, t, 0.3) && t.trees.length) { cell(t.trees[this.rng.int(0, Math.min(t.trees.length, 12) - 1)]); c.taskX += 1; }
+    } else if (res === 'food') {
+      // comida: pesca no cais > frutas > raízes e sementes do capim
+      const fishing = t.dock && t.fish >= 1;
+      const b = fishing ? null : this.plants.nearestBush(c.x, c.z, 40, true);
+      if (fishing) { c.taskX = t.dock!.x + 0.5; c.taskZ = t.dock!.z + 0.5; }
+      else if (b) { c.taskX = b.bush.x + 1.3; c.taskZ = b.bush.z + 0.5; }
+      else if (!this.grassSpot(c, t, 0.25)) return;
+    } else return;
+    c.taskRes = RESOURCES.indexOf(res);
+  }
+
+  /** escolhe um ponto com capim (grama acima de `min`) a até 20 blocos do centro */
+  private grassSpot(c: Creature, t: Tribe, min: number): boolean {
+    const w = this.world;
+    for (let k = 0; k < 25; k++) {
+      const x = t.cx + this.rng.int(-20, 20), z = t.cz + this.rng.int(-20, 20);
+      if (w.inside(x, z) && this.plants.grass[w.idx(x, z)] > min) { c.taskX = x + 0.5; c.taskZ = z + 0.5; return true; }
+    }
+    return false;
+  }
+
+  /** tira 1 unidade do recurso no lugar onde o humano está; false se acabou */
+  private gather(c: Creature, t: Tribe): boolean {
+    const res = RESOURCES[c.taskRes];
+    if (res === 'wood' || res === 'stone') return true; // árvores e rochas não acabam (simplificação)
+    const i = this.world.idx(c.x, c.z);
+    const grassy = () => {
+      if (this.plants.grass[i] < 0.2) return false;
+      this.plants.grass[i] -= 0.25;
+      return true;
+    };
+    if (res === 'fiber') return grassy() || this.nearTree(c); // capim ou cipó
+    if (t.dock && (t.dock.x - c.x) ** 2 + (t.dock.z - c.z) ** 2 < 9) {
+      // pesca no cais: só enquanto houver peixe
+      if (t.fish < 1) return false;
+      t.fish--;
+      return true;
+    }
+    const b = this.plants.nearestBush(c.x, c.z, 2.5, true);
+    if (b) { b.bush.fruit--; return true; }
+    return grassy(); // raízes e sementes
+  }
+
+  private nearTree(c: Creature): boolean {
+    const t = this.tribes[c.tribe];
+    const w = this.world;
+    return !!t && t.trees.some((i) => ((i % w.sx) + 0.5 - c.x) ** 2 + (((i / w.sx) | 0) + 0.5 - c.z) ** 2 < 9);
+  }
+
+  private steerTo(c: Creature, x: number, z: number, dt: number): boolean {
+    const want = Math.atan2(z - c.z, x - c.x);
+    const diff = Math.atan2(Math.sin(want - c.yaw), Math.cos(want - c.yaw));
+    c.yaw += clamp(diff, -TURN_RATE * dt, TURN_RATE * dt);
+    return true;
+  }
+
+  /** constrói a próxima obra liberada, se a tribo tiver os recursos e houver lugar */
+  private tryBuild(t: Tribe): void {
+    const def = nextBuilding(t);
+    if (!def || !canAfford(t, def)) return;
+    const plan = planBuilding(def.key, t, this.world, this.usedCells);
+    if (!plan) {
+      // sem lugar possível (ex.: cais sem água por perto): pula essa obra para não travar a tribo
+      if (def.key === 'cais') t.built.push(def.key);
+      return;
+    }
+    for (const r of RESOURCES) t.store[r] -= def.cost[r] ?? 0;
+    for (const b of plan.block) { this.world.structure[b.i] = b.kind; this.usedCells.add(b.i); }
+    // marca a área inteira como ocupada (nada é construído em cima)
+    for (let k = 0; k < plan.edits.length; k += 4) this.usedCells.add(this.world.idx(plan.edits[k], plan.edits[k + 2]));
+    this.pendingEdits.push(...plan.edits);
+    this.allEdits.push(...plan.edits);
+    t.built.push(def.key);
+    const pos = { x: plan.x, z: plan.z };
+    if (def.key === 'fogueira') t.fire = pos;
+    if (def.key === 'abrigo' || def.key === 'casa') t.shelters.push(pos);
+    if (def.key === 'cais') t.dock = pos;
+    if (def.key === 'plantacao') t.farms++;
+    if (def.key === 'torre') t.tower = true;
+    const first = !this.firstBuilt.has(def.key);
+    this.firstBuilt.add(def.key);
+    const article = first ? (def.g === 'o' ? 'o primeiro ' : 'a primeira ') : (def.g === 'o' ? 'um ' : 'uma ');
+    this.events.push({ t: this.time, text: `Tribo ${t.name} construiu ${article}${def.name.toLowerCase()}` });
+  }
+
+  /** divide uma tribo grande: 10 adultos fundam uma tribo nova, levando parte do conhecimento */
+  private splitTribe(t: Tribe): void {
+    const adults = this.creatures.filter((c) => c.alive && c.tribe === t.id && c.age >= c.maturity);
+    if (adults.length < 14) return;
+    const migrants = adults.slice(-10);
+    const nt = this.foundTribe(10, () => null, migrants);
+    if (!nt) return;
+    nt.knowledge = t.knowledge * 0.8;
+    nt.level = levelFor(nt.knowledge);
+    nt.store.food = Math.min(t.store.food, 10);
+    t.store.food -= nt.store.food;
+    this.events.push({ t: this.time, text: `A tribo ${t.name} se dividiu: nasceu a tribo ${nt.name}` });
+  }
+
+  private nearFire(c: Creature, r: number): boolean {
+    for (const t of this.tribes) if (t.alive && t.fire && (t.fire.x - c.x) ** 2 + (t.fire.z - c.z) ** 2 < r * r) return true;
+    return false;
+  }
+
+  private inShelter(c: Creature): boolean {
+    const t = this.tribes[c.tribe];
+    return !!t && t.shelters.some((s) => (s.x - c.x) ** 2 + (s.z - c.z) ** 2 < 16);
+  }
+
+  /** texto de data para a linha do tempo */
+  static date(t: number): string {
+    return dateLabel(t);
+  }
+
+  /** quanto falta para o próximo nível (0..1) */
+  static levelProgress(t: Tribe): number {
+    const a = LEVEL_KNOWLEDGE[t.level], b = LEVEL_KNOWLEDGE[t.level + 1];
+    return b === undefined ? 1 : (t.knowledge - a) / (b - a);
   }
 
   // ------------------------------------------------------------------

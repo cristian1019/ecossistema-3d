@@ -19,6 +19,15 @@ export function dayNumber(time: number): number {
   return Math.floor(time / DAY_LENGTH + START_TOD) + 1;
 }
 
+/** um ano tem 4 estações de 5 dias (as estações em si chegam na Fase 6) */
+export const YEAR_DAYS = 20;
+
+/** "Ano 2, dia 7" para a linha do tempo */
+export function dateLabel(time: number): string {
+  const d = dayNumber(time) - 1;
+  return `Ano ${Math.floor(d / YEAR_DAYS) + 1}, dia ${(d % YEAR_DAYS) + 1}`;
+}
+
 /** luz do dia: 0 = noite, 1 = dia pleno (a partir da altura do sol) */
 export function daylightAt(time: number): number {
   const sunY = Math.sin((timeOfDay(time) - 0.25) * Math.PI * 2);

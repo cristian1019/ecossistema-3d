@@ -11,11 +11,13 @@ import type { StatsSample } from '../sim/simulation';
 export const SNAP = {
   STRIDE: 12,
   ID: 0, X: 1, Y: 2, Z: 3, YAW: 4, SPECIES: 5, SCALE: 6, COLOR: 7, FLAGS: 8, SPEED: 9, AGE: 10,
+  /** tribo + 1 (0 = sem tribo); a camisa dos humanos tem a cor da tribo */
+  TRIBE: 11,
 } as const;
 
 /** bits do campo FLAGS */
 export const FLAG = {
-  SLEEP: 1, EAT: 2, DRINK: 4, PREGNANT: 8, MALE: 16, YOUNG: 32, ATTACK: 64, NURSE: 128, FLY: 256,
+  SLEEP: 1, EAT: 2, DRINK: 4, PREGNANT: 8, MALE: 16, YOUNG: 32, ATTACK: 64, NURSE: 128, FLY: 256, CARRY: 512, WORK: 1024,
 } as const;
 
 /** layout de cada arbusto: x, y, z, crescimento, frutas */
@@ -59,6 +61,9 @@ export interface CreatureDetail {
   temp: number;
   /** camuflagem no lugar onde está (0..1) */
   camo: number;
+  /** (humanos) tribo e o que carrega */
+  tribe: string | null;
+  carrying: string | null;
   action: string;
   pregnantLeft: number | null;
   input: Float32Array;
@@ -66,6 +71,27 @@ export interface CreatureDetail {
   output: Float32Array;
   w1: Float32Array;
   w2: Float32Array;
+}
+
+/** resumo de uma tribo para o painel */
+export interface TribeInfo {
+  id: number;
+  name: string;
+  color: number;
+  cx: number;
+  cz: number;
+  alive: boolean;
+  members: number;
+  level: number;
+  knowledge: number;
+  /** progresso até o próximo nível (0..1) */
+  progress: number;
+  /** próxima construção e quanto falta de cada recurso */
+  next: string | null;
+  nextCost: Record<string, number>;
+  store: Record<string, number>;
+  built: string[];
+  founded: number;
 }
 
 export type FromSim =
@@ -79,6 +105,9 @@ export type FromSim =
       creatures: Float32Array;
       stats: StatsSample[];
       events: { t: number; text: string }[];
+      /** blocos novos das construções: [x, y, z, bloco, ...] */
+      edits: Int32Array;
     }
+  | { type: 'tribes'; tribes: TribeInfo[] }
   | { type: 'plants'; bushes: Float32Array; grass: Uint8Array | null; carcasses: Float32Array }
   | { type: 'detail'; detail: CreatureDetail | null };

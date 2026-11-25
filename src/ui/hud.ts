@@ -27,7 +27,7 @@ export class Hud {
         <div class="titlebar">
           <div>
             <h1>Ecossistema 3D</h1>
-            <div class="sub">Fase 4 · água e ar: peixes e pássaros</div>
+            <div class="sub">Fase 5 · humanos, tribos e construções</div>
           </div>
           <div class="fps" title="quadros por segundo"><b id="fps">–</b><small>FPS</small></div>
         </div>

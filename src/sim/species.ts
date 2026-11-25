@@ -13,8 +13,9 @@ export const enum Species {
   FOX = 3,
   FISH = 4,
   BIRD = 5,
+  HUMAN = 6,
 }
-export const SPECIES_COUNT = 6;
+export const SPECIES_COUNT = 7;
 
 /** onde a espécie vive e se move */
 export type Medium = 'land' | 'water' | 'air';
@@ -131,7 +132,8 @@ export const SPECIES: SpeciesConfig[] = [
     invest: 0.3,
     readyEnergy: 0.3,
     // caça cervos (grandes: precisa da alcateia) e coelhos
-    prey: [Species.DEER, Species.RABBIT, Species.BIRD], // pássaros só quando pousados no chão
+    // pássaros só quando pousados no chão; humanos de preferência sozinhos (em grupo eles se defendem)
+    prey: [Species.DEER, Species.RABBIT, Species.BIRD, Species.HUMAN],
     mass: 4,
     genes: {
       size: 1, speed: 7, vision: 28, metabolism: 1, fur: 0.55,
@@ -218,6 +220,32 @@ export const SPECIES: SpeciesConfig[] = [
     groupSize: 8, // bandos
     homes: [Biome.FOREST, Biome.PLAINS],
   },
+  {
+    id: Species.HUMAN,
+    name: 'Humano',
+    plural: 'Humanos',
+    chart: '#f2d16b',
+    // onívoro: caça, colhe frutas e come da reserva da tribo
+    diet: 'meat',
+    medium: 'land', algaeEff: 0, fruitHunger: 0.8, cannibal: false,
+    prey: [Species.RABBIT, Species.DEER],
+    basal: 0.8,
+    invest: 0.35,
+    readyEnergy: 0.45,
+    mass: 3,
+    genes: {
+      // mais lento e frágil que os bichos, mas vive mais (e tem cultura: ver tribes.ts)
+      // fur = roupas: começam agasalhados (sem isso morriam de frio nas noites)
+      size: 1, speed: 4, vision: 22, metabolism: 1, fur: 0.5,
+      maxAge: 20 * DAY_LENGTH, litter: 1.2, r: 0.78, g: 0.58, b: 0.45,
+    },
+    gestation: 90,
+    maxStep: 1,
+    grassEff: 0, grazeMin: 1, fruitEff: 1, browseEff: 0,
+    initialCount: 24,
+    groupSize: 8, // 3 tribos de 8
+    homes: [Biome.PLAINS], // vilas em campo aberto, perto da floresta
+  },
 ];
 
 /** espécies que caçam a espécie s */
@@ -236,8 +264,8 @@ export const INPUT_LABELS = [
   'fome', 'sede', 'cansaço', 'frio', 'é noite?',
   'subida à frente', 'bloqueado à frente', 'constante',
 ];
-export const OUTPUT_LABELS = ['virar', 'acelerar', 'comer', 'beber', 'dormir', 'acasalar', 'subir/descer'];
-/** mesmo cérebro para todas as espécies: 23 → 14 → 7 */
+export const OUTPUT_LABELS = ['virar', 'acelerar', 'comer', 'beber', 'dormir', 'acasalar', 'subir/descer', 'coletar', 'construir'];
+/** mesmo cérebro para todas as espécies: 23 → 14 → 9 (coletar/construir só os humanos usam) */
 export const BRAIN_SHAPE = { inputs: INPUT_LABELS.length, hidden: 14, outputs: OUTPUT_LABELS.length };
 
 /** para predadores, "comida" é a presa e "comer" é atacar/comer carne */
@@ -253,6 +281,7 @@ export function outputLabels(species: Species): string[] {
   return OUTPUT_LABELS.map((l, i) => {
     if (i === 2 && cfg.diet === 'meat') return 'atacar';
     if (i === 6 && cfg.medium === 'land') return '(sem uso)';
+    if (i >= 7 && species !== Species.HUMAN) return '(sem uso)';
     return l;
   });
 }

@@ -53,6 +53,10 @@ export class SimWorld {
   readonly nearestWater: Int32Array;
   /** quão boa a célula é para grama crescer (0 = nada cresce) */
   readonly fertility: Float32Array;
+  /** construções: 0 = livre, 1 = cerca (bloqueia animais), 2 = parede (bloqueia todos) */
+  readonly structure: Uint8Array;
+  /** células com pedra exposta (onde humanos tiram pedra) */
+  readonly stoneCells: Int32Array;
   /** cor do chão de cada célula (r, g, b em 0..1): é contra ela que a camuflagem funciona */
   readonly ground: Float32Array;
 
@@ -61,6 +65,10 @@ export class SimWorld {
     this.sz = maps.sizeZ;
     this.nearestWater = this.computeNearestWater();
     this.fertility = this.computeFertility();
+    this.structure = new Uint8Array(this.sx * this.sz);
+    const stones: number[] = [];
+    for (let i = 0; i < this.sx * this.sz; i++) if (!this.isWater(i) && maps.topBlock[i] === Block.STONE) stones.push(i);
+    this.stoneCells = Int32Array.from(stones);
     this.ground = new Float32Array(this.sx * this.sz * 3);
     for (let i = 0; i < this.sx * this.sz; i++) {
       const rgb = faceColor(this.isWater(i) ? Block.WATER : maps.topBlock[i], 0);

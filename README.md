@@ -6,8 +6,10 @@ ninguém programa o comportamento deles; os cérebros e corpos que funcionam mel
 
 A arte é 100% original: blocos com cores planas, variação de tom e contorno feitos no shader, sem texturas de outros jogos.
 
-> **Status:** Fase 4 de 6 concluída: mundo 3D, plantas e algas, coelhos, cervos, lobos, raposas,
-> peixes (nadam em 3D) e pássaros (voam e pousam), com caça, fuga, camuflagem e ciclos predador-presa.
+> **Status:** Fase 5 de 6 concluída: mundo 3D, plantas e algas, coelhos, cervos, lobos, raposas, peixes,
+> pássaros e **humanos em tribos** que coletam recursos, acumulam conhecimento e constroem vilas de blocos.
+
+![Vila da tribo Azul: abrigo de madeira com teto de palha, cerca e humanos](docs/screenshot-fase5.jpg)
 
 ![Cardume de peixes num rio, coelhos na margem e a ficha de uma peixe](docs/screenshot-fase4.jpg)
 
@@ -100,8 +102,8 @@ A simulação anda em passos de 0,2 s de "tempo de simulação"; um dia dura 240
 A cada passo, cada criatura:
 
 1. **Sente** o mundo e preenche as 23 entradas do cérebro.
-2. **Pensa**: as entradas passam pela rede neural (23 → 14 → 7).
-3. **Age** conforme as 7 saídas: virar, acelerar, comer, beber, dormir, acasalar, subir/descer.
+2. **Pensa**: as entradas passam pela rede neural (23 → 14 → 9).
+3. **Age** conforme as 9 saídas: virar, acelerar, comer, beber, dormir, acasalar, subir/descer, coletar, construir.
 4. **Gasta energia**: metabolismo, movimento (∝ massa × velocidade²), cérebro e olhos.
 5. Pode **acasalar**, **parir**, **caçar** ou **morrer** (fome, sede, frio, velhice, predação).
 
@@ -111,7 +113,7 @@ Todas as espécies usam o mesmo cérebro. Para um predador, a entrada "comida" �
 ### O cérebro
 
 ```
- 23 entradas (sentidos)               14 ocultos (tanh)      7 saídas (decisões)
+ 23 entradas (sentidos)               14 ocultos (tanh)      9 saídas (decisões)
  comida/água/parceiro/grupo:            ●                     virar
    [lado, frente, perto]                ●                     acelerar
  predador mais próximo                  ●                     comer (ou atacar)
@@ -119,13 +121,14 @@ Todas as espécies usam o mesmo cérebro. Para um predador, a entrada "comida" �
  subida à frente, bloqueado             ●                     dormir
  constante (viés)                       ●                     acasalar
                                                               subir/descer (peixes e pássaros)
+                                                              coletar, construir (humanos)
 ```
 
 Para quem nada ou voa, a entrada "subida à frente" vira **altura** (fundo/pousado = -1, superfície/alto = +1).
 
 - As direções são **relativas à cabeça do bicho**: seno do ângulo até o alvo (está à esquerda ou à direita?)
   e cosseno (está na frente ou atrás?). Por isso uma única ligação "comida à direita → vire à direita" já funciona.
-- Os **427 pesos fazem parte do DNA**. Não existe treino por gradiente nem "nota": só seleção natural.
+- Os **457 pesos fazem parte do DNA**. Não existe treino por gradiente nem "nota": só seleção natural.
 - A ficha da criatura desenha a rede ao vivo: linha verde reforça, laranja inibe, e as bolinhas acendem conforme ela pensa.
 
 ### Genes de corpo e seus custos (trade-offs)
@@ -207,6 +210,54 @@ depois estabilizam entre ~60 e ~125; os pássaros caem para 6 e se recuperam par
 9 vezes em 25 dias (contra 4–6 em 40 dias na Fase 3): com mais espécies competindo, o sistema oscila mais.
 Reduzir esse "pico e colapso" inicial é um ajuste pendente para a Fase 6.
 
+### Humanos e tribos (Fase 5)
+
+Humanos são onívoros (caçam, colhem frutas e comem da reserva da tribo), **mais lentos e frágeis** que os bichos,
+e vivem mais. O que os diferencia é a **evolução cultural**, que se soma à genética:
+
+- **Tribo**: grupo com um centro, um estoque (madeira, pedra, comida, fibra) e um **conhecimento** que cresce com o tempo
+  de sobrevivência, o tamanho do grupo e as construções feitas (`0,0035 × membros^0,7 × (1 + 0,15 × construções)` por segundo).
+  Filhos herdam a tribo, e com ela todo o conhecimento: a cultura passa adiante sem estar no DNA.
+- **Gene × cultura**: o cérebro (genético) decide **quando** trabalhar, pelas saídas "coletar" e "construir"; fome, perigo e
+  sono desligam o trabalho. A tribo (cultural) decide **o quê**: coleta o recurso que mais falta para a próxima obra, leva
+  ao centro e constrói quando há o suficiente.
+- **Construções liberadas por nível**, cada uma vira **blocos de verdade no mundo** (o worker do mundo refaz a malha só dos
+  chunks tocados) e muda a simulação:
+
+| Nível | Construção | Custo | Efeito na simulação |
+|---|---|---|---|
+| 1 | Fogueira | 4 madeira, 2 pedra | aquece (sem frio num raio de 10) e, à noite, predador não ataca perto dela |
+| 2 | Abrigo de madeira | 14 madeira, 4 fibra | dormir dentro: descansa 60% mais rápido, sem frio e sem ser atacado |
+| 3 | Cerca | 24 madeira | anel de raio 11 com 2 portões: animais não atravessam, humanos sim |
+| 4 | Plantação | 6 madeira, 8 fibra | 1 comida a cada 5 s no estoque |
+| 5 | Cais de pesca | 12 madeira, 4 fibra | pesca no cais (estoque de peixe que se renova devagar) |
+| 6 | Casa de pedra | 24 pedra, 8 madeira | abrigo melhor |
+| 6 | Torre de vigia | 18 pedra, 6 madeira | humanos perto do centro enxergam 50% mais longe |
+
+- **Defesa em grupo**: cada humano acordado a menos de 5 blocos reduz em 25% a chance de um lobo acertar o ataque.
+  Sozinhos, humanos são presas fáceis.
+- **Divisão**: acima de 30 membros, 10 adultos saem e fundam uma tribo nova (levando 80% do conhecimento).
+- **Linha do tempo**: fundações, níveis, construções, divisões, extinções e repovoamentos, com data ("Ano 1, dia 4").
+  Um ano tem 20 dias (4 estações de 5 dias, que chegam na Fase 6).
+
+**Números do equilíbrio dos humanos (e por quê):**
+
+| Parâmetro | Valor | Motivo |
+|---|---|---|
+| Roupas (gene "resistência ao frio") | começa em 50% | com 25% morriam de frio nas primeiras noites |
+| Velocidade | 4 (coelho 5, lobo 7) | humano não alcança coelho correndo; depende de cooperação, coleta e construções |
+| Pesca | estoque de 40 peixes, renova 0,15/s | com peixe infinito os humanos foram a 69 e depois morreram de fome |
+| Divisão | acima de 30 membros | espalha a população em vez de esgotar um lugar só |
+| Plantação | 1 comida a cada 5 s | com 1 a cada 12 s as tribos viviam sem comida e minguavam |
+| Coleta | recurso que mais falta; depois de depositar, reavalia | antes, quem começava na madeira juntava 1.300 de madeira e nada de pedra |
+| Comida de emergência | raízes e sementes do capim | sem frutas por perto, a tribo travava sem comida |
+
+Resultado numa rodada de 25 dias (repovoamento ligado): uma das 3 tribos iniciais sumiu no dia 4; as outras duas viveram
+até o fim sem precisar de repovoamento. A tribo Azul (11 a 17 membros) chegou ao nível 6 e construiu **as sete obras**;
+a Vermelha (3 a 7 membros), seis. O total de humanos ficou entre ~15 e ~23: eles **não dominam** o ecossistema.
+Efeito colateral pendente: com poucos lobos nessa rodada, os cervos dispararam (~530) e os coelhos caíram (~40);
+reequilibrar a rede inteira com as 7 espécies juntas fica para a Fase 6.
+
 ### Instinto inicial e repovoamento
 
 - Com cérebros 100% aleatórios, quase todos os bichos giram em círculos e morrem, e o cervo, que se reproduz devagar,
@@ -215,7 +266,7 @@ Reduzir esse "pico e colapso" inicial é um ajuste pendente para a Fase 6.
   e para predadores "presa perto e fome → perseguir") mais ruído aleatório.
   Depois disso, tudo é seleção natural. Dá para desligar no painel e comparar.
 - **Repovoamento** (pode desligar): se uma espécie cai abaixo de 6 indivíduos, dois bandos novos são soltos a partir
-  dos **melhores genomas já vistos** daquela espécie (mais filhos deixados).
+  dos **melhores genomas já vistos** daquela espécie (mais filhos deixados). Para humanos, nasce uma **tribo nova**.
 
 ### Números do equilíbrio (e por quê)
 
@@ -322,6 +373,9 @@ npm test
 - `aquatic.test.ts`: peixe nasce dentro da água, come algas, não sai da água, sobe e desce, peixe grande come o
   pequeno (mas não o do mesmo tamanho); pássaro decola e pousa, pousa na copa, só come fruta pousado, pesca peixe
   na superfície; raposa pega pássaro no chão, mas não voando.
+- `tribes.test.ts`: níveis de conhecimento e ordem das construções; próxima obra e recurso que mais falta; conhecimento
+  sobe com o tempo (e gera evento); planta da fogueira; construir gasta recursos e coloca blocos; sem recursos, não constrói;
+  **cerca bloqueia animais mas não humanos**; humano coleta madeira e leva ao estoque; filho herda a tribo.
 
 ## Roteiro
 
@@ -332,7 +386,8 @@ npm test
       gráfico da evolução dos genes por espécie
 - [x] **Fase 4**: algas, peixes (nado 3D, peixe grande come pequeno) e pássaros (voo, pouso nas copas, frutas,
       pesca, vulneráveis no chão)
-- [ ] **Fase 5**: humanos, tribos, conhecimento e construções
+- [x] **Fase 5**: humanos em tribos, coleta e estoque, conhecimento cultural, 7 construções que viram blocos no mundo,
+      defesa em grupo, divisão de tribos, painel das tribos e linha do tempo
 - [ ] **Fase 6**: estações, clima, modo deus, salvar/carregar, mini-mapa, polimento
 
 ## Tecnologias

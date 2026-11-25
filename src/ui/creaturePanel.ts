@@ -106,7 +106,9 @@ export class CreaturePanel {
 
     let status = d.alive ? `Agora: <b>${d.action}</b>` : `<b>Morreu de ${d.cause}.</b>`;
     if (d.pregnantLeft !== null) status += ` · grávida, nasce em ${Math.ceil(d.pregnantLeft)} s`;
+    if (d.carrying) status += ` · carrega ${d.carrying}`;
     status += ` · ${d.temp.toFixed(0)} °C`;
+    if (d.tribe) status = `Tribo <b>${d.tribe}</b> · ` + status;
     this.el.cStatus.innerHTML = status;
 
     const bar = (label: string, v: number, color: string) =>

@@ -14,7 +14,8 @@
 import { generateWorld } from '../world/worldgen';
 import { mapsFromWorld, type WorldMaps } from '../sim/simWorld';
 import { DT, Simulation, type Creature } from '../sim/simulation';
-import { FLAG, SNAP, BUSH_STRIDE, CARCASS_STRIDE, type CreatureDetail, type FromSim, type SimSettings, type ToSim } from './simProtocol';
+import { BUILDINGS, RESOURCES, RESOURCE_LABEL, nextBuilding } from '../sim/tribes';
+import { FLAG, SNAP, BUSH_STRIDE, CARCASS_STRIDE, type CreatureDetail, type FromSim, type SimSettings, type ToSim, type TribeInfo } from './simProtocol';
 
 let sim: Simulation | null = null;
 let maps: WorldMaps | null = null;
@@ -102,7 +103,7 @@ function loop(): void {
 
   if (sim) {
     if (now - lastFrame >= 50) { lastFrame = now; sendFrame(); }
-    if (now - lastPlants >= 1000) { lastPlants = now; sendPlants(now - lastGrass >= 2000); }
+    if (now - lastPlants >= 1000) { lastPlants = now; sendPlants(now - lastGrass >= 2000); sendTribes(); }
     if (selectedId !== null && now - lastDetail >= 200) { lastDetail = now; sendDetail(); }
   }
   // na velocidade 1x há poucos passos: dorme um pouco em vez de girar em falso
@@ -127,7 +128,9 @@ function sendFrame(): void {
     buf[o + SNAP.COLOR] = (Math.round(g.r * 255) << 16) | (Math.round(g.g * 255) << 8) | Math.round(g.b * 255);
     buf[o + SNAP.FLAGS] = (c.sleeping ? FLAG.SLEEP : 0) | (c.eating ? FLAG.EAT : 0) | (c.drinking ? FLAG.DRINK : 0) |
       (c.pregnant ? FLAG.PREGNANT : 0) | (c.sex === 1 ? FLAG.MALE : 0) | (grow < 1 ? FLAG.YOUNG : 0) |
-      (c.attacking ? FLAG.ATTACK : 0) | (c.nursing ? FLAG.NURSE : 0) | (c.cfg.medium === 'air' && !c.landed ? FLAG.FLY : 0);
+      (c.attacking ? FLAG.ATTACK : 0) | (c.nursing ? FLAG.NURSE : 0) | (c.cfg.medium === 'air' && !c.landed ? FLAG.FLY : 0) |
+      (c.carry > 0 ? FLAG.CARRY : 0) | (c.working ? FLAG.WORK : 0);
+    buf[o + SNAP.TRIBE] = c.tribe + 1;
     buf[o + SNAP.SPEED] = c.v;
     buf[o + SNAP.AGE] = c.age / g.maxAge;
   }
@@ -135,7 +138,25 @@ function sendFrame(): void {
   statsSent = s.stats.length;
   const events = s.events.slice(eventsSent);
   eventsSent = s.events.length;
-  post({ type: 'frame', time: s.time, realSpeed: speed > 0 ? realSpeed : 0, count: n, creatures: buf, stats, events }, [buf.buffer]);
+  const edits = Int32Array.from(s.pendingEdits);
+  s.pendingEdits = [];
+  post({ type: 'frame', time: s.time, realSpeed: speed > 0 ? realSpeed : 0, count: n, creatures: buf, stats, events, edits }, [buf.buffer, edits.buffer]);
+}
+
+function sendTribes(): void {
+  const s = sim!;
+  const tribes: TribeInfo[] = s.tribes.map((t) => {
+    const nb = nextBuilding(t);
+    const nextCost: Record<string, number> = {};
+    if (nb) for (const [r, v] of Object.entries(nb.cost)) nextCost[r] = v ?? 0;
+    return {
+      id: t.id, name: t.name, color: t.color, cx: t.cx, cz: t.cz, alive: t.alive, members: t.members,
+      level: t.level, knowledge: t.knowledge, progress: Simulation.levelProgress(t),
+      next: nb ? nb.name : null, nextCost, store: { ...t.store },
+      built: t.built.map((k) => BUILDINGS.find((b) => b.key === k)!.name), founded: t.founded,
+    };
+  });
+  post({ type: 'tribes', tribes });
 }
 
 function sendPlants(withGrass: boolean): void {
@@ -169,6 +190,8 @@ function actionOf(c: Creature): string {
   if (!c.alive) return 'morto';
   if (c.sleeping) return c.cfg.medium === 'air' && !c.landed ? 'descendo para dormir' : 'dormindo';
   if (c.nursing) return 'mamando';
+  if (c.working) return 'coletando';
+  if (c.carry > 0) return 'levando recursos para a tribo';
   if (c.attacking) return 'atacando!';
   if (c.drinking) return 'bebendo';
   if (c.eating) return c.cfg.diet === 'meat' && c.targets.carcass ? 'comendo carne' : 'comendo';
@@ -191,6 +214,8 @@ function sendDetail(): void {
     genes: { ...c.genome.genes },
     energy: c.energy, maxEnergy: c.maxEnergy, hydration: c.hydration, fatigue: c.fatigue,
     coldStress: c.coldStress, temp: c.temp, camo: c.camo, action: actionOf(c),
+    tribe: c.tribe >= 0 ? sim!.tribes[c.tribe].name : null,
+    carrying: c.carry > 0 ? `${c.carry} de ${RESOURCE_LABEL[RESOURCES[c.carryRes]]}` : null,
     pregnantLeft: c.pregnant ? c.pregnant.timer : null,
     input: c.input.slice(), hidden: c.hidden.slice(), output: c.output.slice(),
     w1: c.genome.brain.w1.slice(), w2: c.genome.brain.w2.slice(),

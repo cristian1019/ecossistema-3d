@@ -22,7 +22,7 @@ const I = {
   hunger: 15, thirst: 16, fatigue: 17, night: 19, height: 20, blocked: 21, bias: 22,
 };
 // índices das saídas (OUTPUT_LABELS)
-const O = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5, vertical: 6 };
+const O = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5, vertical: 6, collect: 7, build: 8 };
 
 export function instinctBrain(shape: BrainShape, rng: Rng, diet: 'plants' | 'meat' = 'plants'): Brain {
   // ruído pequeno em todos os pesos: cada indivíduo é um pouco diferente
@@ -67,6 +67,11 @@ export function instinctBrain(shape: BrainShape, rng: Rng, diet: 'plants' | 'mea
   w1(12, I.height, -2); w2(O.vertical, 12, 2);
   // neurônio 13: comida perto, cansaço ou noite → descer (pássaro pousa para comer e dormir)
   w1(13, I.foodNear, 2); w1(13, I.fatigue, 2); w1(13, I.night, 1); w1(13, I.bias, -2); w2(O.vertical, 13, -3);
+
+  // (só humanos usam) coletar e construir quando não há urgência:
+  // fome (neurônio 2), perigo (10) ou sono (4) desligam o trabalho
+  w2(O.collect, NH, 0.8); w2(O.build, NH, 0.8);
+  w2(O.collect, 2, -1.2); w2(O.collect, 10, -2); w2(O.collect, 4, -1);
 
   // vieses das saídas: anda em velocidade média, evita dormir à toa
   w2(O.speed, NH, 0.3);

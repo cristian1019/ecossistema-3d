@@ -20,7 +20,14 @@ export const enum Block {
   GRAVEL = 13,
   CACTUS = 14,
   SWAMP_LEAVES = 15,
-  // 16+ reservado para os blocos construídos pelos humanos (Fase 5)
+  // blocos construídos pelos humanos
+  PLANK = 16,
+  COBBLE = 17,
+  FENCE = 18,
+  FARMLAND = 19,
+  CROP = 20,
+  CAMPFIRE = 21,
+  THATCH = 22,
 }
 
 export const BLOCK_COUNT = 32;
@@ -42,6 +49,13 @@ export const BLOCK_NAMES: Record<number, string> = {
   [Block.GRAVEL]: 'cascalho',
   [Block.CACTUS]: 'cacto',
   [Block.SWAMP_LEAVES]: 'folhas do pântano',
+  [Block.PLANK]: 'tábuas',
+  [Block.COBBLE]: 'pedra lavrada',
+  [Block.FENCE]: 'cerca',
+  [Block.FARMLAND]: 'terra arada',
+  [Block.CROP]: 'plantação',
+  [Block.CAMPFIRE]: 'fogueira',
+  [Block.THATCH]: 'palha',
 };
 
 type RGB = [number, number, number];
@@ -64,6 +78,13 @@ const FACE_COLORS: Record<number, [RGB, RGB, RGB]> = {
   [Block.MUD]: [hex(0x5e4b35), hex(0x574531), hex(0x4f3f2d)],
   [Block.GRAVEL]: [hex(0x8f8a82), hex(0x86817a), hex(0x7d7871)],
   [Block.CACTUS]: [hex(0x7cb35c), hex(0x4f9a4a), hex(0x4f9a4a)],
+  [Block.PLANK]: [hex(0xc49a5c), hex(0xb48a4e), hex(0xa07a44)],
+  [Block.COBBLE]: [hex(0x9a9a96), hex(0x7f7f7c), hex(0x6f6f6c)],
+  [Block.FENCE]: [hex(0x8a6236), hex(0x7a5530), hex(0x6a4a2a)],
+  [Block.FARMLAND]: [hex(0x5e4126), hex(0x6e4c2c), hex(0x5e4126)],
+  [Block.CROP]: [hex(0xd8c050), hex(0x9cb84a), hex(0x7a9a3a)],
+  [Block.CAMPFIRE]: [hex(0xff8a2a), hex(0xd8501e), hex(0x5a3a2a)],
+  [Block.THATCH]: [hex(0xd6b86a), hex(0xc0a45c), hex(0xb0944e)],
 };
 
 const MAGENTA: [RGB, RGB, RGB] = [hex(0xff00ff), hex(0xff00ff), hex(0xff00ff)];

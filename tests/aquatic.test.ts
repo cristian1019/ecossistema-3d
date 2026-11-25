@@ -142,10 +142,10 @@ describe('pássaros', () => {
     expect(onGround.cause).toBe('predação');
   });
 
-  it('o cérebro tem 7 saídas e 14 ocultos para todas as espécies', () => {
+  it('o cérebro tem 9 saídas e 14 ocultos para todas as espécies', () => {
     const b = randomBrain(BRAIN_SHAPE, createRng(1));
-    expect(BRAIN_SHAPE.outputs).toBe(7);
+    expect(BRAIN_SHAPE.outputs).toBe(9);
     expect(b.w1.length).toBe(23 * 14);
-    expect(b.w2.length).toBe(7 * 15);
+    expect(b.w2.length).toBe(9 * 15);
   });
 });

@@ -11,8 +11,8 @@
 import * as THREE from 'three';
 import { FLAG, SNAP } from '../workers/simProtocol';
 
-type ColorMode = 'body' | 'dark' | 'light' | number;
-type Kind = 'none' | 'head' | 'legF' | 'legB' | 'ear' | 'male' | 'wing' | 'tail' | 'perchLeg';
+type ColorMode = 'body' | 'dark' | 'light' | 'tribe' | number;
+type Kind = 'none' | 'head' | 'legF' | 'legB' | 'ear' | 'male' | 'wing' | 'tail' | 'perchLeg' | 'carry';
 
 interface PartDef {
   size: [number, number, number];
@@ -106,13 +106,26 @@ const BIRD: PartDef[] = [
   ...pair({ size: [0.04, 0.16, 0.04], pos: [0.02, 0.08, 0.07], color: 0xe8a23a, kind: 'perchLeg' }),
 ];
 
+// humano: pele = cor dos genes, camisa = cor da tribo; braços balançam (ou trabalham)
+const HUMAN: PartDef[] = [
+  { size: [0.18, 0.55, 0.18], pos: [0, 0.275, 0.11], color: 0x3b3a48, kind: 'legF' }, // calça
+  { size: [0.18, 0.55, 0.18], pos: [0, 0.275, -0.11], color: 0x3b3a48, kind: 'legB' },
+  { size: [0.3, 0.55, 0.44], pos: [0, 0.83, 0], color: 'tribe', far: true }, // camisa
+  { size: [0.14, 0.5, 0.12], pos: [0, 0.83, 0.29], color: 'body', kind: 'legB' }, // braços (balançam ao contrário das pernas)
+  { size: [0.14, 0.5, 0.12], pos: [0, 0.83, -0.29], color: 'body', kind: 'legF' },
+  { size: [0.3, 0.3, 0.3], pos: [0, 1.26, 0], color: 'body', head: true, far: true },
+  { size: [0.32, 0.1, 0.32], pos: [-0.01, 1.43, 0], color: 0x3a2a1c, head: true }, // cabelo
+  ...pair({ size: [0.04, 0.05, 0.05], pos: [0.15, 1.29, 0.07], color: 0x111111, head: true }),
+  { size: [0.22, 0.26, 0.32], pos: [-0.26, 0.92, 0], color: 0x8a6a3a, kind: 'carry' }, // trouxa nas costas
+];
+
 /** altura da cabeça (para a câmera "olhos do bicho") e do marcador, por espécie */
-export const HEAD_HEIGHT = [0.75, 1.85, 1.05, 0.78, 0.05, 0.5];
-const MARKER_TOP = [1.3, 2.6, 1.5, 1.2, 0.6, 1.0];
+export const HEAD_HEIGHT = [0.75, 1.85, 1.05, 0.78, 0.05, 0.5, 1.3];
+const MARKER_TOP = [1.3, 2.6, 1.5, 1.2, 0.6, 1.0, 1.8];
 /** quanto a cabeça desce ao comer/beber */
-const HEAD_DROP = [0.22, 0.75, 0.45, 0.3, 0, 0.15];
+const HEAD_DROP = [0.22, 0.75, 0.45, 0.3, 0, 0.15, 0.25];
 /** espécies sem sombra "blob" no chão (peixe na água; pássaro voando é tratado à parte) */
-const NO_SHADOW = [false, false, false, false, true, false];
+const NO_SHADOW = [false, false, false, false, true, false, false];
 
 /** modelo + escala base de cada espécie (índice = Species) */
 const SPECIES_MODELS: { parts: PartDef[]; scale: number; shadow: number }[] = [
@@ -122,6 +135,7 @@ const SPECIES_MODELS: { parts: PartDef[]; scale: number; shadow: number }[] = [
   { parts: FOX, scale: 0.75, shadow: 0.9 },
   { parts: FISH, scale: 0.8, shadow: 0 },
   { parts: BIRD, scale: 0.8, shadow: 0.6 },
+  { parts: HUMAN, scale: 1.0, shadow: 0.8 },
 ];
 
 const MAX = 2000;
@@ -173,6 +187,8 @@ export class CreatureRenderer {
   private readonly c2 = new THREE.Color();
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly zAxis = new THREE.Vector3(0, 0, 1);
+  /** cor de cada tribo (índice = id da tribo) */
+  private tribeColors: THREE.Color[] = [];
   private readonly frustum = new THREE.Frustum();
   private readonly projView = new THREE.Matrix4();
   private readonly sphere = new THREE.Sphere();
@@ -219,6 +235,10 @@ export class CreatureRenderer {
     );
     this.marker.visible = false;
     this.group.add(this.marker);
+  }
+
+  setTribeColors(colors: number[]): void {
+    this.tribeColors = colors.map((c) => new THREE.Color(c));
   }
 
   /** chega um quadro novo do worker */
@@ -286,6 +306,9 @@ export class CreatureRenderer {
       const headDown = (flags & (FLAG.EAT | FLAG.DRINK | FLAG.NURSE)) !== 0;
       const lunge = (flags & FLAG.ATTACK) !== 0;
       const flying = (flags & FLAG.FLY) !== 0;
+      const carrying = (flags & FLAG.CARRY) !== 0;
+      const working = (flags & FLAG.WORK) !== 0;
+      const tribe = buf[o + SNAP.TRIBE] - 1;
       const male = (flags & FLAG.MALE) !== 0;
       // passada: fase avança com a velocidade; cada bicho tem sua própria fase (id)
       const anim = animate && !far;
@@ -309,6 +332,7 @@ export class CreatureRenderer {
         if (part.kind === 'male' && !male) continue;
         if (sleeping && (part.kind === 'legF' || part.kind === 'legB')) continue;
         if (flying && part.kind === 'perchLeg') continue; // patinhas recolhidas no voo
+        if (part.kind === 'carry' && !carrying) continue;
         const mesh = sp.meshes[pi];
         const n = sp.partCount[pi]++;
         let px = part.pos[0], py = part.pos[1];
@@ -319,7 +343,9 @@ export class CreatureRenderer {
         if (part.kind === 'legF' || part.kind === 'legB') {
           // perna gira em torno do quadril (topo da perna)
           const side = part.pos[2] > 0 ? 0 : Math.PI * 0.5;
-          const ang = stride === 0 ? 0 : Math.sin(phase + (part.kind === 'legB' ? Math.PI : 0) + side) * 0.6 * stride;
+          let ang = stride === 0 ? 0 : Math.sin(phase + (part.kind === 'legB' ? Math.PI : 0) + side) * 0.6 * stride;
+          // humano trabalhando: os braços batem (machado, picareta, colheita)
+          if (working && species === 6 && py > 0.6) ang = -0.9 - Math.abs(Math.sin(time * 9 + id)) * 0.9;
           this.local.makeTranslation(px, py + h / 2, part.pos[2]);
           if (ang !== 0) { this.tmp.makeRotationAxis(this.zAxis, ang); this.local.multiply(this.tmp); }
           this.tmp.makeTranslation(0, -h / 2, 0);
@@ -357,6 +383,7 @@ export class CreatureRenderer {
         if (part.color === 'body') mesh.setColorAt(n, this.c);
         else if (part.color === 'dark') mesh.setColorAt(n, this.c2.copy(this.c).multiplyScalar(0.72));
         else if (part.color === 'light') mesh.setColorAt(n, this.c2.copy(this.c).lerp(WHITE, 0.45));
+        else if (part.color === 'tribe') mesh.setColorAt(n, this.tribeColors[tribe] ?? GRAY);
         else mesh.setColorAt(n, this.c2.setHex(part.color));
       }
 
@@ -417,3 +444,4 @@ export class CreatureRenderer {
 }
 
 const WHITE = new THREE.Color(0xffffff);
+const GRAY = new THREE.Color(0x888888);

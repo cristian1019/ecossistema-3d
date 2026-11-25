@@ -21,7 +21,8 @@ import { PlantRenderer } from './render/plantRenderer';
 import { Hud } from './ui/hud';
 import { PopulationChart } from './ui/charts';
 import { CreaturePanel } from './ui/creaturePanel';
-import { dayNumber, timeOfDay } from './sim/clock';
+import { TribePanel } from './ui/tribePanel';
+import { dateLabel, dayNumber, timeOfDay } from './sim/clock';
 import type { FromWorldWorker, ToWorldWorker, WorldMeta } from './workers/protocol';
 import type { FromSim, SimSettings, ToSim } from './workers/simProtocol';
 
@@ -77,10 +78,8 @@ const hud = new Hud(hudRoot, {
     simPost({ type: 'settings', settings: s });
   },
   onReset: () => {
-    simPost({ type: 'settings', settings });
-    simPost({ type: 'reset' });
-    chart.reset();
-    select(null);
+    // as construções das tribos viraram blocos no mundo: reiniciar = gerar o mundo de novo
+    generate(currentSeed);
   },
 });
 const chart = new PopulationChart(hudRoot);
@@ -91,6 +90,13 @@ const panel = new CreaturePanel(hudRoot, {
   onSelect: (id) => select(id),
 });
 rig.onModeChange = (m) => hud.setCameraMode(m);
+const tribePanel = new TribePanel(hudRoot.querySelector('.panel')!, (x, z) => {
+  exitEyes();
+  select(null);
+  rig.setMode('orbit');
+  rig.lookAt(x + 0.5, z + 0.5, 45);
+});
+let currentSeed = 'ecossistema';
 
 function setSpeed(s: number): void {
   speed = s;
@@ -156,6 +162,8 @@ function simPost(msg: ToSim): void {
 
 function generate(seedText: string): void {
   const text = seedText.trim() || 'ecossistema';
+  currentSeed = text;
+  tribePanel.reset();
   const seed = hashSeed(text);
   hud.setSeed(text);
   const url = new URL(location.href);
@@ -216,7 +224,10 @@ function onSim(msg: FromSim): void {
       chart.add(msg.stats);
       const last = msg.stats[msg.stats.length - 1];
       if (last) { lastCounts = last.pop; lastBushes = last.bushes; lastGrass = last.grass; }
-      for (const ev of msg.events) hud.showEvent(`Dia ${dayNumber(ev.t)}: ${ev.text}`);
+      for (const ev of msg.events) hud.showEvent(`${dateLabel(ev.t)}: ${ev.text}`);
+      tribePanel.addEvents(msg.events);
+      // construções novas: manda os blocos para o worker do mundo refazer a malha dos chunks
+      if (msg.edits.length) worldWorkers[0]?.postMessage({ type: 'edit', edits: msg.edits } satisfies ToWorldWorker, [msg.edits.buffer]);
       // a criatura selecionada sumiu do quadro (morreu): sai dos olhos dela
       if (selectedId !== null && eyes && !creatures.has(selectedId)) exitEyes();
       break;
@@ -225,6 +236,10 @@ function onSim(msg: FromSim): void {
       plants.set(msg.bushes);
       plants.setCarcasses(msg.carcasses);
       if (msg.grass) chunks.setGrass(msg.grass);
+      break;
+    case 'tribes':
+      tribePanel.setTribes(msg.tribes);
+      creatures.setTribeColors(msg.tribes.map((t) => t.color));
       break;
     case 'detail':
       if (selectedId === null) break;

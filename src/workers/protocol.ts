@@ -5,15 +5,18 @@
 import type { MeshBuffers } from '../world/mesher';
 import type { WorldConfig } from '../world/voxelWorld';
 
-export type ToWorldWorker = {
-  type: 'generate';
-  seed: number;
-  /** este worker gera as malhas dos chunks com (índice % workers === part) */
-  part: number;
-  workers: number;
-  /** só um worker devolve os mapas 2D (altura, biomas...) */
-  sendMeta: boolean;
-};
+export type ToWorldWorker =
+  /** blocos colocados pelas construções: [x, y, z, bloco, ...] */
+  | { type: 'edit'; edits: Int32Array }
+  | {
+      type: 'generate';
+      seed: number;
+      /** este worker gera as malhas dos chunks com (índice % workers === part) */
+      part: number;
+      workers: number;
+      /** só um worker devolve os mapas 2D (altura, biomas...) */
+      sendMeta: boolean;
+    };
 
 export interface WorldMeta {
   seed: number;
