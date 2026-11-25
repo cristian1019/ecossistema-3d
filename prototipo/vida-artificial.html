@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vida Artificial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* VOICE: curioso, de laboratório, mas brincalhão
+   IDEA: uma placa de Petri sob o microscópio, com o cérebro de uma célula ampliado ao lado
+   PICTURE: a simulação grande no topo; abaixo, a rede neural da célula acesa ao vivo
+   COLOUR and TYPE: verde-ágar escuro na placa, verde-limão da comida, células coloridas; Sora + Inter
+   LAYOUT: placa à esquerda, painel à direita; cérebro em faixa larga; empilha no celular */
+:root{color-scheme:light dark;--bg:light-dark(#fbfcfa,#08110f);--ink:light-dark(#0c1714,#e3efe9);--mut:light-dark(#4d5f59,#9fb4ac);--pan:light-dark(#eef4f0,#0f1d1a);--line:light-dark(#d3e0da,#21352f);--food:#9be15d}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif;overflow-x:clip}
+.band{padding:clamp(20px,3vw,40px) max(4vw,16px)}
+h1,h2,h3{font-family:Sora,Inter,sans-serif;line-height:1.08;text-wrap:balance;margin:0}
+h1{font-size:clamp(28px,4vw,40px)}h2{font-size:clamp(24px,3vw,32px);margin-bottom:8px}h3{font-size:18px;margin-bottom:6px}
+.sub{color:var(--mut);margin:6px 0 0;max-width:68ch}
+.wrap{max-width:1240px;margin:0 auto}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;margin-top:20px}
+.fig{position:relative;min-height:340px;height:clamp(420px,64vh,660px);border-radius:22px;overflow:hidden;background:radial-gradient(circle at 50% 42%,#164338 0%,#0b2620 45%,#04110d 100%);box-shadow:inset 0 0 0 1px #ffffff14,inset 0 0 80px #000a,0 18px 40px -20px #0b2a2480}
+.fig>canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:manipulation}
+.hint{position:absolute;left:14px;bottom:12px;color:#cfe6dd;font-size:13px;background:#04110dcc;padding:6px 10px;border-radius:10px;pointer-events:none}
+.ext{position:absolute;inset:0;display:none;place-content:center;text-align:center;gap:12px;color:#e3efe9;background:#04110dd9}
+.ext.on{display:grid}.ext p{margin:0;font:700 26px Sora,sans-serif}
+.panel{background:var(--pan);border-radius:22px;padding:18px;display:flex;flex-direction:column;gap:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button{font:600 15px Inter,sans-serif;min-height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--food);outline-offset:2px}
+button.pri{background:var(--ink);color:var(--bg);border-color:var(--ink);flex:1}
+.seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:0 12px;min-width:48px;flex:1}.seg button[aria-pressed=true]{background:var(--food);color:#0c1714}
+.cap{font-size:14px;font-weight:600;margin-bottom:6px}
+label{display:block;font-size:14px;font-weight:600}
+label span{float:right;color:var(--mut);font-weight:500;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;height:32px;accent-color:#5fb03a}
+.chk{display:flex;align-items:center;gap:10px;min-height:40px}.chk input{width:22px;height:22px;flex:none;accent-color:#5fb03a}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.st{background:var(--bg);border-radius:12px;padding:8px 12px}
+.st b{display:block;font:700 22px Sora,sans-serif;font-variant-numeric:tabular-nums}.st small{color:var(--mut);font-size:13px}
+.insp{font-size:14px;background:var(--bg);border-radius:12px;padding:10px 12px;color:var(--mut)}
+.insp b{color:var(--ink)}
+.charts{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px;margin-top:20px}
+.card{background:var(--pan);border-radius:18px;padding:14px 16px}
+.card .fig2{position:relative;height:110px;margin-top:6px}.card .fig2>svg{position:absolute;inset:0;width:100%;height:100%}
+.key{display:flex;gap:14px;font-size:13px;color:var(--mut)}.key i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.big{font:700 24px Sora,sans-serif;font-variant-numeric:tabular-nums}
+.legend{height:10px;border-radius:6px;background:linear-gradient(90deg,hsl(200 85% 60%),hsl(120 85% 55%),hsl(50 90% 55%),hsl(0 85% 60%))}
+.legend.lin{background:linear-gradient(90deg,hsl(0 80% 62%),hsl(60 80% 62%),hsl(120 80% 62%),hsl(180 80% 62%),hsl(240 80% 62%),hsl(300 80% 62%),hsl(360 80% 62%))}
+.lg{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);margin-top:4px}
+.brainBand{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px;margin-top:20px;align-items:start}
+.bfig{position:relative;height:340px;background:var(--pan);border-radius:22px}
+.bfig>svg{position:absolute;inset:0;width:100%;height:100%;color:var(--ink)}
+.bnote{color:var(--mut);margin:0 0 10px}
+.out{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:8px}
+.how p,.next li{color:var(--mut);margin:0}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;margin-top:28px}
+.next{margin:0;padding-left:20px;display:grid;gap:8px}.next b{color:var(--ink)}
+@media(max-width:900px){.main,.brainBand{grid-template-columns:minmax(0,1fr)}.charts{grid-template-columns:1fr 1fr}.charts .card:first-child{grid-column:1/-1}}
+@media(max-width:600px){.how,.cols{grid-template-columns:minmax(0,1fr)}.fig{height:62vh}.bfig{height:380px}}
+</style>
+</head>
+<body>
+<div class="band"><div class="wrap">
+  <h1>Vida artificial: cérebros que evoluem sozinhos</h1>
+  <p class="sub">Cada célula tem genes (velocidade, tamanho, visão) e um pequeno cérebro de rede neural. Ninguém ensina nada: os cérebros começam aleatórios, e os que por acaso funcionam melhor deixam mais filhos.</p>
+
+  <div class="main">
+    <div class="fig">
+      <canvas id="dish" aria-label="Simulação de criaturas evoluindo"></canvas>
+      <div class="hint" id="hint">Toque numa célula para ver o cérebro dela · toque no vazio para jogar comida</div>
+      <div class="ext" id="ext"><p>Extinção!</p><button class="pri" id="reborn">Nova população</button></div>
+    </div>
+
+    <aside class="panel">
+      <div class="row">
+        <button class="pri" id="play">Pausar</button>
+        <div class="seg" role="group" aria-label="Velocidade da simulação">
+          <button data-s="1" aria-pressed="true">1x</button><button data-s="4" aria-pressed="false">4x</button><button data-s="12" aria-pressed="false">12x</button>
+        </div>
+      </div>
+      <div><div class="cap">Quem controla as células</div>
+        <div class="seg" role="group" aria-label="Modo de controle" id="modeSeg">
+          <button data-m="nn" aria-pressed="true">Rede neural</button><button data-m="rule" aria-pressed="false">Regras fixas</button>
+        </div></div>
+      <div><label for="food">Comida por segundo <span id="foodV"></span></label><input type="range" id="food" min="5" max="180" step="5" value="60"></div>
+      <div><label for="mut">Taxa de mutação <span id="mutV"></span></label><input type="range" id="mut" min="0" max="0.4" step="0.01" value="0.12"></div>
+      <label class="chk"><input type="checkbox" id="pred"> Predação (grandes comem pequenas)</label>
+      <label class="chk"><input type="checkbox" id="auto" checked> Repovoar com o melhor cérebro se quase todas morrerem</label>
+      <div class="stats">
+        <div class="st"><b id="sPop">0</b><small>população</small></div>
+        <div class="st"><b id="sGen">0</b><small>geração máxima</small></div>
+      </div>
+      <div><div class="legend lin" id="leg"></div><div class="lg" id="legT"><span>cor = família</span><span>cores parecidas, cérebros parecidos</span></div></div>
+      <div class="insp" id="insp">Nenhuma célula selecionada.</div>
+      <button id="reset">Recomeçar do zero</button>
+    </aside>
+  </div>
+
+  <div class="brainBand">
+    <div class="bfig"><svg id="brain" aria-label="Rede neural da célula em foco"></svg></div>
+    <div>
+      <h2 id="bTitle">O cérebro</h2>
+      <p class="bnote" id="bSub">Esperando a primeira célula.</p>
+      <p class="bnote">Bolinhas da esquerda são os sentidos, as do meio são neurônios escondidos e as da direita são as decisões. Linha verde reforça, laranja inibe, e quanto mais grossa, mais forte. As bolinhas acendem conforme a célula pensa.</p>
+      <div class="out">
+        <div class="st"><b id="oTurn">–</b><small>virar</small></div>
+        <div class="st"><b id="oGo">–</b><small>acelerar</small></div>
+      </div>
+      <div class="insp" style="margin-top:10px" id="champ">Recorde: ainda nenhum.</div>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="card"><div class="key"><span><i style="background:#5fb03a"></i>população</span><span><i style="background:#9fb4ac"></i>comida</span></div><div class="fig2"><svg id="chPop"></svg></div></div>
+    <div class="card"><small>Velocidade média</small><div class="big" id="tSpd">–</div><div class="fig2"><svg id="spSpd"></svg></div></div>
+    <div class="card"><small>Tamanho médio</small><div class="big" id="tSize">–</div><div class="fig2"><svg id="spSize"></svg></div></div>
+    <div class="card"><small>Filhos por célula (média)</small><div class="big" id="tKids">–</div><div class="fig2"><svg id="spKids"></svg></div></div>
+  </div>
+</div></div>
+
+<div class="band" style="background:var(--pan)"><div class="wrap">
+  <h2>Como funciona</h2>
+  <div class="how">
+    <div><h3>Sentidos → neurônios → ações</h3><p>A cada passo a célula sente a comida e o vizinho mais próximos (de que lado estão, se estão à frente, se estão perto), se o vizinho é maior e quanta energia ela tem. Isso passa por 6 neurônios e sai como duas decisões: virar e acelerar.</p></div>
+    <div><h3>Pesos são genes</h3><p>Os 68 números que ligam os neurônios (os pesos) ficam no DNA. O filho herda o cérebro do pai com pequenas mutações. Não existe treino nem gabarito, só seleção natural.</p></div>
+    <div><h3>Energia decide tudo</h3><p>Acelerar gasta energia (custo cresce com tamanho³ × velocidade²). Comer dá energia, e com 60 de energia a célula se divide. Um cérebro bom aprende a mirar na comida e a não gastar à toa.</p></div>
+  </div>
+  <div class="cols">
+    <div><h3>Experimentos para testar</h3><ol class="next">
+      <li><b>Assista o começo:</b> nas primeiras gerações as células giram perdidas. Em 12x, em poucos minutos elas passam a ir direto na comida.</li>
+      <li><b>Compare com regras fixas:</b> troque o modo e veja se a evolução chega perto da estratégia programada à mão.</li>
+      <li><b>Predação:</b> ligue e observe se surgem cérebros que fogem quando o vizinho é maior.</li>
+    </ol></div>
+    <div><h3>Próximos passos possíveis</h3><ol class="next">
+      <li><b>Salvar o campeão:</b> guardar o melhor cérebro e carregar em outra simulação.</li>
+      <li><b>Mais sentidos:</b> paredes, cheiro de comida, quantidade de vizinhos.</li>
+      <li><b>Memória:</b> neurônios que guardam o valor do passo anterior (rede recorrente).</li>
+    </ol></div>
+  </div>
+</div></div>
+
+<script>
+{
+const cv=document.getElementById('dish'),ctx=cv.getContext('2d'),$=id=>document.getElementById(id);
+const REPRO=60,FOOD_E=9,MAXPOP=450,MAXFOOD=700,HIST=240,NI=9,NH=6,NO=2,CELL=50;
+const IN_L=['comida: lado','comida: frente','comida: perto','vizinho: lado','vizinho: frente','vizinho: perto','vizinho maior?','energia','constante'];
+const OUT_L=['virar','acelerar'];
+const P={food:1,mut:0.12,pred:false,auto:true,nn:true,steps:1,run:true};
+let W=0,H=0,dpr=1,cr=[],food=[],tick=0,sel=null,hist=[],frame=0,champ=null,gcols=1,grows=1,gFood=[],gCr=[];
+const gauss=()=>(Math.random()+Math.random()+Math.random()-1.5)*1.15;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const cost=(g,v)=>0.012+Math.pow(g.size/6,3)*v*v*0.018+g.sense*0.00025;
+const randBrain=()=>({w1:Array.from({length:NH*NI},()=>gauss()),w2:Array.from({length:NO*(NH+1)},()=>gauss())});
+const mutB=b=>({w1:b.w1.map(w=>w+gauss()*P.mut*1.5),w2:b.w2.map(w=>w+gauss()*P.mut*1.5)});
+const mk=(x,y,g,brain,gen,e)=>({x,y,g,brain,gen,e,a:Math.random()*6.283,v:0,age:0,kids:0,dead:false,act:null});
+const baseG=()=>({spd:clamp(1.4+gauss()*0.3,0.3,5),size:6,sense:60,hue:Math.random()*360});
+
+function resize(){
+  const r=cv.getBoundingClientRect(),nw=Math.max(200,r.width),nh=Math.max(200,r.height);
+  if(W&&H){for(const c of cr){c.x*=nw/W;c.y*=nh/H}for(const f of food){f.x*=nw/W;f.y*=nh/H}}
+  W=nw;H=nh;dpr=Math.min(2,window.devicePixelRatio||1);
+  cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function seed(){
+  cr=[];food=[];tick=0;sel=null;hist=[];champ=null;
+  for(let i=0;i<70;i++)cr.push(mk(Math.random()*W,Math.random()*H,baseG(),randBrain(),1,30));
+  for(let i=0;i<200;i++)food.push({x:Math.random()*W,y:Math.random()*H});
+  $('ext').classList.remove('on');
+}
+function child(c){
+  const m=P.mut,g={spd:clamp(c.g.spd*(1+gauss()*m),0.3,5),size:clamp(c.g.size*(1+gauss()*m),2.5,16),sense:clamp(c.g.sense*(1+gauss()*m),10,200),hue:(c.g.hue+gauss()*m*60+360)%360};
+  return mk(clamp(c.x+gauss()*8,0,W),clamp(c.y+gauss()*8,0,H),g,mutB(c.brain),c.gen+1,c.e);
+}
+const cellOf=(x,y)=>clamp(Math.floor(y/CELL),0,grows-1)*gcols+clamp(Math.floor(x/CELL),0,gcols-1);
+function buildGrid(){
+  gcols=Math.ceil(W/CELL)+1;grows=Math.ceil(H/CELL)+1;const n=gcols*grows;
+  gFood=Array.from({length:n},()=>[]);gCr=Array.from({length:n},()=>[]);
+  for(const f of food)gFood[cellOf(f.x,f.y)].push(f);
+  for(const c of cr)gCr[cellOf(c.x,c.y)].push(c);
+}
+function nearest(grid,c,R,ok){
+  let best=null,bd=R*R;const r=Math.ceil(R/CELL),cx=Math.floor(c.x/CELL),cy=Math.floor(c.y/CELL);
+  for(let y=Math.max(0,cy-r);y<=Math.min(grows-1,cy+r);y++)for(let x=Math.max(0,cx-r);x<=Math.min(gcols-1,cx+r);x++)
+    for(const o of grid[y*gcols+x]){if(!ok(o))continue;const dx=o.x-c.x,dy=o.y-c.y,d=dx*dx+dy*dy;if(d<bd){bd=d;best=o}}
+  return best?{o:best,d:Math.sqrt(bd)}:null;
+}
+function think(c,nf,nc){
+  const S=c.g.sense,inp=new Array(NI).fill(0);
+  if(nf){const rel=Math.atan2(nf.o.y-c.y,nf.o.x-c.x)-c.a;inp[0]=Math.sin(rel);inp[1]=Math.cos(rel);inp[2]=1-nf.d/S}
+  if(nc){const rel=Math.atan2(nc.o.y-c.y,nc.o.x-c.x)-c.a;inp[3]=Math.sin(rel);inp[4]=Math.cos(rel);inp[5]=1-nc.d/S;
+    inp[6]=nc.o.g.size>c.g.size*1.15?1:nc.o.g.size*1.15<c.g.size?-1:0}
+  inp[7]=clamp(c.e/REPRO,0,1);inp[8]=1;
+  const b=c.brain,h=[];
+  for(let j=0;j<NH;j++){let s=0;for(let i=0;i<NI;i++)s+=b.w1[j*NI+i]*inp[i];h.push(Math.tanh(s))}
+  const o=[];
+  for(let k=0;k<NO;k++){let s=b.w2[k*(NH+1)+NH];for(let j=0;j<NH;j++)s+=b.w2[k*(NH+1)+j]*h[j];o.push(s)}
+  const turn=Math.tanh(o[0]),go=1/(1+Math.exp(-o[1]));
+  c.act={i:inp,h,o:[turn,go]};
+  return [turn,go];
+}
+const score=c=>c.kids*4+c.age/250;
+function noteDeath(c){if(!champ||score(c)>champ.s)champ={s:score(c),kids:c.kids,gen:c.gen,age:c.age,brain:c.brain,g:{...c.g}}}
+function step(){
+  tick++;
+  let n=P.food;while(n>0){if(Math.random()<n&&food.length<MAXFOOD)food.push({x:Math.random()*W,y:Math.random()*H});n--}
+  buildGrid();
+  const born=[];
+  for(const c of cr){
+    if(c.dead)continue;
+    const S=c.g.sense,r=c.g.size;
+    const nf=nearest(gFood,c,S,f=>!f.eaten);
+    let prey=null;
+    if(P.nn){
+      const nc=nearest(gCr,c,S,o=>o!==c&&!o.dead);
+      const [turn,go]=think(c,nf,nc);
+      c.a+=turn*0.3;c.v=c.g.spd*go;
+      if(P.pred&&nc&&nc.o.g.size*1.6<=c.g.size)prey=nc.o;
+    }else{
+      let tgt=nf?nf.o:null,td=nf?nf.d:1e9;
+      if(P.pred){const np=nearest(gCr,c,S,o=>o!==c&&!o.dead&&o.g.size*1.6<=c.g.size);if(np){prey=np.o;if(np.d<td){tgt=np.o;td=np.d}}}
+      if(tgt){const t=Math.atan2(tgt.y-c.y,tgt.x-c.x);const da=((t-c.a+Math.PI*3)%(Math.PI*2))-Math.PI;c.a+=clamp(da,-0.25,0.25)}
+      else c.a+=(Math.random()-0.5)*0.4;
+      c.v=c.g.spd;c.act=null;
+    }
+    c.x+=Math.cos(c.a)*c.v;c.y+=Math.sin(c.a)*c.v;
+    if(c.x<r){c.x=r;c.a=Math.PI-c.a}if(c.x>W-r){c.x=W-r;c.a=Math.PI-c.a}
+    if(c.y<r){c.y=r;c.a=-c.a}if(c.y>H-r){c.y=H-r;c.a=-c.a}
+    c.e-=cost(c.g,c.v);c.age++;
+    if(nf&&!nf.o.eaten&&Math.hypot(nf.o.x-c.x,nf.o.y-c.y)<r+3){nf.o.eaten=true;c.e+=FOOD_E}
+    if(prey&&!prey.dead&&Math.hypot(prey.x-c.x,prey.y-c.y)<r+prey.g.size*0.5){prey.dead=true;noteDeath(prey);c.e+=prey.e*0.6+10}
+    if(c.e>=REPRO&&cr.length+born.length<MAXPOP){c.e/=2;c.kids++;born.push(child(c))}
+    if(c.e<=0){c.dead=true;noteDeath(c)}
+  }
+  food=food.filter(f=>!f.eaten);
+  cr=cr.filter(c=>!c.dead).concat(born);
+  if(P.nn&&P.auto&&cr.length<6){
+    for(let i=0;i<14;i++){
+      const fromChamp=champ&&i<10;
+      const g=fromChamp?{...champ.g,hue:(champ.g.hue+gauss()*20+360)%360}:baseG();
+      cr.push(mk(Math.random()*W,Math.random()*H,g,fromChamp?mutB(champ.brain):randBrain(),fromChamp?champ.gen+1:1,30));
+    }
+  }
+  if(tick%20===0)record();
+}
+function avg(f){return cr.length?cr.reduce((s,c)=>s+f(c),0)/cr.length:0}
+function record(){
+  hist.push({pop:cr.length,food:food.length,spd:avg(c=>c.g.spd),size:avg(c=>c.g.size),kids:avg(c=>c.kids)});
+  if(hist.length>HIST)hist.shift();
+  drawCharts();
+}
+function color(c){
+  if(P.nn)return `hsl(${c.g.hue.toFixed(0)} 80% 62%)`;
+  return `hsl(${(200-clamp((c.g.spd-0.3)/3.2,0,1)*200).toFixed(0)} 85% 60%)`;
+}
+function focus(){
+  if(sel&&!sel.dead)return sel;
+  let o=null;for(const c of cr)if(!o||c.age>o.age)o=c;return o;
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#9be15d';ctx.beginPath();
+  for(const f of food){ctx.moveTo(f.x+2,f.y);ctx.arc(f.x,f.y,2,0,6.283)}
+  ctx.fill();
+  for(const c of cr){
+    const r=c.g.size;
+    ctx.globalAlpha=0.5+0.5*clamp(c.e/REPRO,0,1);
+    ctx.fillStyle=color(c);ctx.beginPath();ctx.arc(c.x,c.y,r,0,6.283);ctx.fill();
+    ctx.globalAlpha=1;ctx.fillStyle='#04110d';ctx.beginPath();
+    ctx.arc(c.x+Math.cos(c.a)*r*0.5,c.y+Math.sin(c.a)*r*0.5,Math.max(1,r*0.22),0,6.283);ctx.fill();
+  }
+  const f=focus();
+  if(f){
+    ctx.strokeStyle=f===sel?'#ffffff':'#ffffff99';ctx.lineWidth=2;ctx.beginPath();ctx.arc(f.x,f.y,f.g.size+4,0,6.283);ctx.stroke();
+    ctx.setLineDash([4,5]);ctx.strokeStyle='#ffffff55';ctx.lineWidth=1;ctx.beginPath();ctx.arc(f.x,f.y,f.g.sense,0,6.283);ctx.stroke();ctx.setLineDash([]);
+  }
+}
+const f1=v=>v.toFixed(1).replace('.',',');
+function ui(){
+  $('sPop').textContent=cr.length;
+  $('sGen').textContent=cr.reduce((m,c)=>Math.max(m,c.gen),0);
+  $('tSpd').textContent=cr.length?f1(avg(c=>c.g.spd)):'–';
+  $('tSize').textContent=cr.length?f1(avg(c=>c.g.size)):'–';
+  $('tKids').textContent=cr.length?f1(avg(c=>c.kids)):'–';
+  const i=$('insp');
+  if(!sel)i.textContent='Nenhuma célula selecionada. O cérebro abaixo mostra a mais velha.';
+  else if(sel.dead)i.innerHTML='<b>Esta célula morreu.</b> Mostrando a mais velha.';
+  else i.innerHTML=`<b>Geração ${sel.gen}</b> · ${sel.kids} filho(s)<br>Velocidade <b>${f1(sel.g.spd)}</b> · Tamanho <b>${f1(sel.g.size)}</b> · Visão <b>${Math.round(sel.g.sense)}</b><br>Energia <b>${Math.round(sel.e)}</b> / ${REPRO}`;
+  $('ext').classList.toggle('on',cr.length===0);
+  $('champ').innerHTML=champ?`<b>Recorde:</b> ${champ.kids} filho(s), viveu ${Math.round(champ.age/60)} s, geração ${champ.gen}`:'Recorde: ainda nenhum.';
+  drawBrain();
+}
+function drawBrain(){
+  const s=$('brain'),w=s.clientWidth,h=s.clientHeight,c=focus();
+  if(!c||!w){s.innerHTML='';return}
+  $('bTitle').textContent=c===sel?'Cérebro da célula selecionada':'Cérebro da célula mais velha';
+  $('bSub').textContent=P.nn?`Geração ${c.gen}, viva há ${Math.round(c.age/60)} s, ${c.kids} filho(s).`:'No modo regras fixas o cérebro existe, mas não é usado.';
+  const narrow=w<480,L=narrow?104:128,R=narrow?64:84,xs=[L,L+(w-L-R)/2,w-R];
+  const ny=n=>Array.from({length:n},(_,i)=>(i+1)*h/(n+1));
+  const yi=ny(NI),yh=ny(NH),yo=ny(NO),b=c.brain,a=P.nn?c.act:null;
+  const edge=(x1,y1,x2,y2,wt)=>`<line x1="${x1}" y1="${y1.toFixed(1)}" x2="${x2}" y2="${y2.toFixed(1)}" stroke="${wt>0?'#5fb03a':'#e0663d'}" stroke-opacity="${(0.15+Math.min(1,Math.abs(wt)/2.5)*0.75).toFixed(2)}" stroke-width="${(0.6+Math.min(3,Math.abs(wt))).toFixed(1)}"/>`;
+  let out='';
+  for(let j=0;j<NH;j++)for(let i=0;i<NI;i++)out+=edge(xs[0],yi[i],xs[1],yh[j],b.w1[j*NI+i]);
+  for(let k=0;k<NO;k++)for(let j=0;j<NH;j++)out+=edge(xs[1],yh[j],xs[2],yo[k],b.w2[k*(NH+1)+j]);
+  const node=(x,y,v,r)=>{const fill=v==null?'var(--bg)':v>=0?`rgba(155,225,93,${(0.15+0.85*Math.min(1,v)).toFixed(2)})`:`rgba(224,102,61,${(0.15+0.85*Math.min(1,-v)).toFixed(2)})`;
+    return `<circle cx="${x}" cy="${y.toFixed(1)}" r="${r}" fill="${fill}" stroke="currentColor" stroke-opacity=".5" stroke-width="1.5"/>`};
+  for(let i=0;i<NI;i++){out+=node(xs[0],yi[i],a?a.i[i]:null,9);out+=`<text x="${xs[0]-15}" y="${(yi[i]+4.5).toFixed(1)}" text-anchor="end" font-size="13" fill="currentColor">${IN_L[i]}</text>`}
+  for(let j=0;j<NH;j++)out+=node(xs[1],yh[j],a?a.h[j]:null,10);
+  for(let k=0;k<NO;k++){out+=node(xs[2],yo[k],a?(k?a.o[1]*2-1:a.o[0]):null,13);out+=`<text x="${xs[2]+20}" y="${(yo[k]+4.5).toFixed(1)}" font-size="13" font-weight="600" fill="currentColor">${OUT_L[k]}</text>`}
+  s.innerHTML=out;
+  if(a){const t=a.o[0];$('oTurn').textContent=Math.abs(t)<0.1?'reto':(t>0?'direita ':'esquerda ')+Math.round(Math.abs(t)*100)+'%';$('oGo').textContent=Math.round(a.o[1]*100)+'%'}
+  else{$('oTurn').textContent='–';$('oGo').textContent='–'}
+}
+function line(svg,series){
+  const w=svg.clientWidth,h=svg.clientHeight;if(!w||hist.length<2){svg.innerHTML='';return}
+  let out='';
+  for(const s of series){
+    const vals=hist.map(s.f),mx=Math.max(...vals,s.min||0.1)*1.1,mn=s.zero?0:Math.min(...vals)*0.9,rg=mx-mn||1;
+    const pts=vals.map((v,i)=>`${(i/(HIST-1)*w).toFixed(1)},${(h-2-(v-mn)/rg*(h-4)).toFixed(1)}`).join(' ');
+    out+=`<polyline points="${pts}" fill="none" stroke="${s.c}" stroke-width="2" stroke-linejoin="round"/>`;
+  }
+  svg.innerHTML=out;
+}
+function drawCharts(){
+  line($('chPop'),[{f:d=>d.food,c:'#9fb4ac',zero:1,min:10},{f:d=>d.pop,c:'#5fb03a',zero:1,min:10}]);
+  line($('spSpd'),[{f:d=>d.spd,c:'#e0663d'}]);
+  line($('spSize'),[{f:d=>d.size,c:'#3d8fe0'}]);
+  line($('spKids'),[{f:d=>d.kids,c:'#b06ad8',zero:1}]);
+}
+function setLegend(){
+  $('leg').classList.toggle('lin',P.nn);
+  $('legT').innerHTML=P.nn?'<span>cor = família</span><span>cores parecidas, cérebros parecidos</span>':'<span>lenta</span><span>cor = velocidade</span><span>rápida</span>';
+}
+function loop(){
+  if(P.run)for(let i=0;i<P.steps;i++)step();
+  draw();
+  if(++frame%8===0)ui();
+  requestAnimationFrame(loop);
+}
+cv.addEventListener('click',e=>{
+  const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  let hit=null,hd=1e9;
+  for(const c of cr){const d=Math.hypot(c.x-x,c.y-y);if(d<c.g.size+10&&d<hd){hd=d;hit=c}}
+  if(hit)sel=hit;
+  else{sel=null;for(let i=0;i<20&&food.length<MAXFOOD;i++)food.push({x:clamp(x+gauss()*18,0,W),y:clamp(y+gauss()*18,0,H)})}
+  $('hint').style.display='none';ui();
+});
+$('play').addEventListener('click',()=>{P.run=!P.run;$('play').textContent=P.run?'Pausar':'Continuar'});
+document.querySelectorAll('[data-s]').forEach(b=>b.addEventListener('click',()=>{
+  P.steps=+b.dataset.s;document.querySelectorAll('[data-s]').forEach(x=>x.setAttribute('aria-pressed',x===b))}));
+document.querySelectorAll('[data-m]').forEach(b=>b.addEventListener('click',()=>{
+  P.nn=b.dataset.m==='nn';document.querySelectorAll('[data-m]').forEach(x=>x.setAttribute('aria-pressed',x===b));setLegend();ui()}));
+const fIn=$('food'),mIn=$('mut');
+const syncF=()=>{P.food=fIn.value/60;$('foodV').textContent=fIn.value};
+const syncM=()=>{P.mut=+mIn.value;$('mutV').textContent=Math.round(mIn.value*100)+'%'};
+fIn.addEventListener('input',syncF);mIn.addEventListener('input',syncM);
+$('pred').addEventListener('change',e=>{P.pred=e.target.checked});
+$('auto').addEventListener('change',e=>{P.auto=e.target.checked});
+$('reset').addEventListener('click',()=>{seed();drawCharts();ui()});
+$('reborn').addEventListener('click',()=>{seed();ui()});
+const ro=new ResizeObserver(()=>{resize();drawCharts();drawBrain()});
+resize();ro.observe(cv);ro.observe($('brain'));
+syncF();syncM();setLegend();seed();ui();loop();
+}
+</script>
+</body>
+</html>

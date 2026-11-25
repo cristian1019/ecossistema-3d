@@ -1,0 +1,65 @@
+:root {
+  --ink: #e8f0ec;
+  --mut: #a8b8b1;
+  --glass: rgba(10, 20, 18, 0.72);
+  --line: rgba(255, 255, 255, 0.12);
+  --acc: #9be15d;
+  --acc-ink: #0c1714;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1220; color: var(--ink); font: 14px/1.45 Inter, system-ui, sans-serif; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud > * { pointer-events: auto; }
+
+.panel {
+  position: absolute; top: 16px; left: 16px; width: 300px; max-width: calc(100vw - 32px);
+  background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.panel h1 { font: 700 18px/1.1 Sora, Inter, sans-serif; margin: 0; }
+.panel .sub { color: var(--mut); font-size: 12px; margin-top: 2px; }
+.fps { display: flex; align-items: baseline; gap: 8px; }
+.fps b { font: 700 30px/1 Sora, sans-serif; font-variant-numeric: tabular-nums; }
+.fps b.warn { color: #f0b35a; } .fps b.bad { color: #ef6b55; }
+.fps small { color: var(--mut); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; color: var(--mut); font-variant-numeric: tabular-nums; }
+.grid2 span b { color: var(--ink); font-weight: 600; }
+.cap { font-size: 12px; font-weight: 600; color: var(--mut); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.row { display: flex; gap: 6px; align-items: center; }
+input[type=text] { flex: 1; min-width: 0; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: rgba(0,0,0,.3); color: var(--ink); padding: 0 10px; font: inherit; }
+button { height: 34px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--ink); font: 600 13px Inter, sans-serif; cursor: pointer; white-space: nowrap; }
+button:hover { background: rgba(255,255,255,.12); }
+button.pri { background: var(--acc); color: var(--acc-ink); border-color: var(--acc); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; flex: 1; }
+.seg button { border: 0; border-radius: 0; flex: 1; padding: 0 7px; }
+.seg button[aria-pressed=true] { background: var(--acc); color: var(--acc-ink); }
+input[type=range] { width: 100%; accent-color: var(--acc); }
+.clock { font: 600 14px Sora, sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.info { font-size: 12px; color: var(--mut); }
+.info b { color: var(--ink); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+.help {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  background: var(--glass); border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px;
+  font-size: 12px; color: var(--mut); max-width: calc(100vw - 32px); text-align: center;
+}
+.help kbd { font: 600 11px Inter, sans-serif; color: var(--ink); background: rgba(255,255,255,.1); border-radius: 4px; padding: 1px 5px; }
+
+.loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 14px; text-align: center; background: rgba(8, 14, 22, 0.82); transition: opacity .4s; }
+.loading.hide { opacity: 0; pointer-events: none; }
+.loading p { margin: 0; font: 700 22px Sora, sans-serif; }
+.loading small { color: var(--mut); }
+.bar { width: min(320px, 70vw); height: 8px; background: rgba(255,255,255,.12); border-radius: 6px; overflow: hidden; margin: 0 auto; }
+.bar i { display: block; height: 100%; width: 0; background: var(--acc); transition: width .15s; }
+
+.crosshair { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 2px solid rgba(255,255,255,.7); border-radius: 50%; pointer-events: none; display: none; }
+.crosshair.on { display: block; }
+
+@media (max-width: 640px) {
+  .panel { width: auto; right: 16px; top: 10px; left: 10px; gap: 8px; padding: 10px 12px; }
+  .help { display: none; }
+}
