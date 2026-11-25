@@ -6,8 +6,10 @@ ninguém programa o comportamento deles; os cérebros e corpos que funcionam mel
 
 A arte é 100% original: blocos com cores planas, variação de tom e contorno feitos no shader, sem texturas de outros jogos.
 
-> **Status:** Fase 3 de 6 concluída: mundo 3D, plantas, herbívoros (coelhos e cervos) e predadores
-> (lobos e raposas) com caça, fuga, camuflagem e ciclos predador-presa.
+> **Status:** Fase 4 de 6 concluída: mundo 3D, plantas e algas, coelhos, cervos, lobos, raposas,
+> peixes (nadam em 3D) e pássaros (voam e pousam), com caça, fuga, camuflagem e ciclos predador-presa.
+
+![Cardume de peixes num rio, coelhos na margem e a ficha de uma peixe](docs/screenshot-fase4.jpg)
 
 ![Lobo selecionado com a ficha mostrando o cérebro de predador; cervo e gráfico de população](docs/screenshot-fase3.jpg)
 
@@ -98,8 +100,8 @@ A simulação anda em passos de 0,2 s de "tempo de simulação"; um dia dura 240
 A cada passo, cada criatura:
 
 1. **Sente** o mundo e preenche as 23 entradas do cérebro.
-2. **Pensa**: as entradas passam pela rede neural (23 → 12 → 6).
-3. **Age** conforme as 6 saídas: virar, acelerar, comer, beber, dormir, acasalar.
+2. **Pensa**: as entradas passam pela rede neural (23 → 14 → 7).
+3. **Age** conforme as 7 saídas: virar, acelerar, comer, beber, dormir, acasalar, subir/descer.
 4. **Gasta energia**: metabolismo, movimento (∝ massa × velocidade²), cérebro e olhos.
 5. Pode **acasalar**, **parir**, **caçar** ou **morrer** (fome, sede, frio, velhice, predação).
 
@@ -109,18 +111,21 @@ Todas as espécies usam o mesmo cérebro. Para um predador, a entrada "comida" �
 ### O cérebro
 
 ```
- 23 entradas (sentidos)               12 ocultos (tanh)      6 saídas (decisões)
+ 23 entradas (sentidos)               14 ocultos (tanh)      7 saídas (decisões)
  comida/água/parceiro/grupo:            ●                     virar
    [lado, frente, perto]                ●                     acelerar
  predador mais próximo                  ●                     comer (ou atacar)
  fome, sede, cansaço, frio, noite  ──▶  ●   ──────────────▶   beber
  subida à frente, bloqueado             ●                     dormir
  constante (viés)                       ●                     acasalar
+                                                              subir/descer (peixes e pássaros)
 ```
+
+Para quem nada ou voa, a entrada "subida à frente" vira **altura** (fundo/pousado = -1, superfície/alto = +1).
 
 - As direções são **relativas à cabeça do bicho**: seno do ângulo até o alvo (está à esquerda ou à direita?)
   e cosseno (está na frente ou atrás?). Por isso uma única ligação "comida à direita → vire à direita" já funciona.
-- Os **354 pesos fazem parte do DNA**. Não existe treino por gradiente nem "nota": só seleção natural.
+- Os **427 pesos fazem parte do DNA**. Não existe treino por gradiente nem "nota": só seleção natural.
 - A ficha da criatura desenha a rede ao vivo: linha verde reforça, laranja inibe, e as bolinhas acendem conforme ela pensa.
 
 ### Genes de corpo e seus custos (trade-offs)
@@ -178,6 +183,29 @@ Todas as espécies usam o mesmo cérebro. Para um predador, a entrada "comida" �
 - **Amamentação**: filhotes de qualquer espécie, na primeira metade da infância e a menos de 8 blocos da mãe, recebem
   energia dela (até 0,5% da reserva da mãe por segundo); filhote pequeno segue a mãe. Sem isso, filhotes de predador,
   que ainda não sabem caçar, morriam todos de fome.
+
+### Água e ar: peixes, algas e pássaros (Fase 4)
+
+Cada espécie tem um **meio**: terra (anda), água (nada em 3D) ou ar (voa e pousa).
+
+- **Algas** crescem no fundo da água rasa (1 a 8 blocos de profundidade), de forma logística, mais de dia.
+  O fundo fica verde-escuro conforme a quantidade (o mesmo truque de textura da grama, num segundo canal).
+- **Peixes** nadam em 3D: a saída "subir/descer" muda a altura entre o fundo e a superfície, e eles nunca saem da
+  água (a margem bloqueia, e a entrada "bloqueado à frente" avisa). Comem algas, e **peixe grande come peixe pequeno**
+  (menor que 70% do tamanho dele), então o tamanho do corpo vira uma corrida armamentista dentro da própria espécie.
+  Sangue frio: gastam menos, não passam sede e a água varia menos de temperatura.
+- **Pássaros** voam (bater asas custa energia), sobem e descem pela saída "subir/descer" e **pousam** ao tocar a copa
+  das árvores ou o chão (nunca na água). Comem frutas só pousados e **pescam** peixes que chegam a menos de 1,5 bloco
+  da superfície. Ficam **vulneráveis só quando pousados no chão**: lobos e raposas não alcançam um pássaro voando nem
+  pousado no alto de uma árvore. Por isso a evolução pode favorecer dormir nas copas.
+- Instinto inicial extra: "longe da altura confortável → corrija" (peixe no meio da água, pássaro a ~10 blocos) e
+  "comida perto, cansaço ou noite → descer" (o pássaro pousa para comer e dormir).
+
+Resultado numa rodada de 25 dias com as 6 espécies (repovoamento ligado): todas convivem até o fim, mas os primeiros
+dias são turbulentos. Os peixes nascem demais no dia 1 (cerca de 1.100 ovos), esgotam as algas locais e caem para ~40,
+depois estabilizam entre ~60 e ~125; os pássaros caem para 6 e se recuperam para ~65–85. O repovoamento entrou
+9 vezes em 25 dias (contra 4–6 em 40 dias na Fase 3): com mais espécies competindo, o sistema oscila mais.
+Reduzir esse "pico e colapso" inicial é um ajuste pendente para a Fase 6.
 
 ### Instinto inicial e repovoamento
 
@@ -291,6 +319,9 @@ npm test
 - `predation.test.ts`: lobo mata coelho dormindo (vira carcaça), predador come a carcaça, a carcaça apodrece,
   predador não come planta, raposa não caça cervo, **camuflagem** (coelho da cor da grama não é notado a 14 blocos,
   coelho branco é), coelho com instinto **foge**, filhote **mama** e mãe fraca não amamenta.
+- `aquatic.test.ts`: peixe nasce dentro da água, come algas, não sai da água, sobe e desce, peixe grande come o
+  pequeno (mas não o do mesmo tamanho); pássaro decola e pousa, pousa na copa, só come fruta pousado, pesca peixe
+  na superfície; raposa pega pássaro no chão, mas não voando.
 
 ## Roteiro
 
@@ -299,7 +330,8 @@ npm test
       reprodução sexuada; gráfico de população; ficha com a rede neural ao vivo
 - [x] **Fase 3**: lobos e raposas, caça em grupo, carcaças, fuga, camuflagem, amamentação, ciclos predador-presa,
       gráfico da evolução dos genes por espécie
-- [ ] **Fase 4**: peixes, algas e pássaros
+- [x] **Fase 4**: algas, peixes (nado 3D, peixe grande come pequeno) e pássaros (voo, pouso nas copas, frutas,
+      pesca, vulneráveis no chão)
 - [ ] **Fase 5**: humanos, tribos, conhecimento e construções
 - [ ] **Fase 6**: estações, clima, modo deus, salvar/carregar, mini-mapa, polimento
 

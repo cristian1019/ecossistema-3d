@@ -28,12 +28,18 @@ export const BROWSE_GROWTH = 0.008;
 /** taxa de crescimento da grama por segundo (célula fértil, de dia) */
 export const GRASS_GROWTH = 0.002;
 export const MAX_BUSHES = 2000;
+/** algas: crescem no fundo de água rasa (até 8 blocos de profundidade) */
+export const ALGAE_ENERGY = 5;
+export const ALGAE_GROWTH = 0.004;
 
 export class Plants {
   readonly grass: Float32Array;
   /** folhas ao alcance em volta das árvores (0..1), comida exclusiva de quem alcança */
   readonly browse: Float32Array;
   readonly browseCells: Int32Array;
+  /** algas (0..1) no fundo das células de água rasa; comida dos peixes */
+  readonly algae: Float32Array;
+  readonly algaeCells: Int32Array;
   /** só as células onde grama pode crescer (evita varrer o mapa todo) */
   readonly grassCells: Int32Array;
   bushes: Bush[] = [];
@@ -73,6 +79,15 @@ export class Plants {
     this.browseCells = Int32Array.from(bc);
     for (const i of this.browseCells) this.browse[i] = 0.6 + 0.4 * rng.next();
 
+    // algas: água com 1 a 8 blocos de profundidade (luz chega no fundo)
+    this.algae = new Float32Array(N);
+    const ac: number[] = [];
+    for (let i = 0; i < N; i++) {
+      const depth = world.maps.waterTop[i] - world.maps.height[i];
+      if (depth >= 1 && depth <= 8) { ac.push(i); this.algae[i] = 0.4 + 0.4 * rng.next(); }
+    }
+    this.algaeCells = Int32Array.from(ac);
+
     // arbustos iniciais em lugares bem férteis
     let tries = 0;
     while (this.bushes.length < initialBushes && tries++ < initialBushes * 20) {
@@ -95,6 +110,13 @@ export class Plants {
       const nv = v + k * f[i] * (v + 0.15) * (1 - v / cap);
       g[i] = nv > cap ? cap : nv;
     }
+    // algas: logística, mais rápidas na água mais rasa (mais luz)
+    const a = this.algae, ka = ALGAE_GROWTH * dt * (0.2 + 0.8 * daylight) * this.growthMul;
+    for (let n = 0; n < this.algaeCells.length; n++) {
+      const i = this.algaeCells[n];
+      const v = a[i];
+      a[i] = Math.min(1, v + ka * (v + 0.1) * (1 - v));
+    }
     // folhas das árvores: mesma ideia, sem depender da fertilidade do chão
     const b = this.browse, kb = BROWSE_GROWTH * dt * (0.25 + 0.75 * daylight) * this.growthMul;
     for (let n = 0; n < this.browseCells.length; n++) {
@@ -102,6 +124,13 @@ export class Plants {
       const v = b[i];
       b[i] = Math.min(1, v + kb * (v + 0.15) * (1 - v));
     }
+  }
+
+  /** Come até `amount` de algas da célula i; devolve quanto comeu. */
+  eatAlgae(i: number, amount: number): number {
+    const got = Math.min(this.algae[i], amount);
+    this.algae[i] -= got;
+    return got;
   }
 
   /** Come até `amount` de folhas da célula i; devolve quanto comeu. */
@@ -179,13 +208,20 @@ export class Plants {
     return got;
   }
 
-  /** Grama como bytes 0..255 (vira uma textura que pinta o chão na tela). */
+  /**
+   * Textura das plantas do chão, 2 bytes por bloco: R = grama (0..255), G = algas (0..255).
+   * O shader do terreno usa R no topo dos blocos de grama e G no fundo da água.
+   */
   grassBytes(): Uint8Array {
-    const out = new Uint8Array(this.grass.length);
+    const out = new Uint8Array(this.grass.length * 2);
     for (let n = 0; n < this.grassCells.length; n++) {
       const i = this.grassCells[n];
       const f = Math.min(1, this.world.fertility[i]);
-      out[i] = Math.round(Math.min(1, this.grass[i] / Math.max(0.2, f)) * 255);
+      out[i * 2] = Math.round(Math.min(1, this.grass[i] / Math.max(0.2, f)) * 255);
+    }
+    for (let n = 0; n < this.algaeCells.length; n++) {
+      const i = this.algaeCells[n];
+      out[i * 2 + 1] = Math.round(this.algae[i] * 255);
     }
     return out;
   }

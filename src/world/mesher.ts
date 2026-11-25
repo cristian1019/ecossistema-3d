@@ -23,7 +23,7 @@ export interface MeshBuffers {
   normals: Int8Array;
   colors: Uint8Array;
   indices: Uint32Array;
-  /** 255 nos vértices do topo de blocos de grama (o shader pinta a grama comida) */
+  /** 255 no topo de blocos de grama, 128 no fundo da água (o shader pinta grama comida e algas) */
   grass: Uint8Array;
   quads: number;
 }
@@ -144,8 +144,9 @@ function meshPadded(p: Padded, pass: MeshPass): MeshBuffers | null {
           if (pass === 'opaque') {
             const sa = OP[a], sb = OP[b];
             if (sa !== sb) {
-              if (sa && aInside) val = a | (1 << 8) | (aoAt(ia + Sd) << 9);
-              else if (sb && bInside) val = b | (aoAt(ia) << 9);
+              // bit 17: a face encosta na água (fundo de rio/lago/mar: onde crescem algas)
+              if (sa && aInside) val = a | (1 << 8) | (aoAt(ia + Sd) << 9) | (b === WATER ? 1 << 17 : 0);
+              else if (sb && bInside) val = b | (aoAt(ia) << 9) | (a === WATER ? 1 << 17 : 0);
             }
           } else {
             // água: só as faces que encostam no ar (a superfície e as quedas d'água)
@@ -182,7 +183,9 @@ function meshPadded(p: Padded, pass: MeshPass): MeshBuffers | null {
           const base = pos.len / 3;
 
           pos.ensure(12); nor.ensure(12); col.ensure(12); idx.ensure(6); grs.ensure(4);
-          const grassTop = face === 0 && (id === Block.GRASS || id === Block.FOREST_GRASS || id === Block.SWAMP_GRASS) ? 255 : 0;
+          // 255 = topo de grama, 128 = topo debaixo d'água (algas), 0 = nada
+          const wet = (m >> 17) & 1;
+          const grassTop = face !== 0 ? 0 : wet ? 128 : (id === Block.GRASS || id === Block.FOREST_GRASS || id === Block.SWAMP_GRASS) ? 255 : 0;
           for (let k = 0; k < 4; k++) {
             // canto k: deslocamento (0|w) em u e (0|h) em v
             const ou = k === 1 || k === 2 ? w : 0;

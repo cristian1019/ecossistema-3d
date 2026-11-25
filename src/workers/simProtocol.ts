@@ -15,7 +15,7 @@ export const SNAP = {
 
 /** bits do campo FLAGS */
 export const FLAG = {
-  SLEEP: 1, EAT: 2, DRINK: 4, PREGNANT: 8, MALE: 16, YOUNG: 32, ATTACK: 64, NURSE: 128,
+  SLEEP: 1, EAT: 2, DRINK: 4, PREGNANT: 8, MALE: 16, YOUNG: 32, ATTACK: 64, NURSE: 128, FLY: 256,
 } as const;
 
 /** layout de cada arbusto: x, y, z, crescimento, frutas */

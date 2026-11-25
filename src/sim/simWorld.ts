@@ -21,16 +21,27 @@ export interface WorldMaps {
   topBlock: Uint8Array;
   /** posição das árvores (troncos), para as folhas que os cervos comem */
   trees: { x: number; z: number }[];
+  /** y do bloco sólido mais alto de cada coluna CONTANDO as copas (onde um pássaro pousa) */
+  canopy: Uint8Array;
 }
 
 export function mapsFromWorld(g: GeneratedWorld): WorldMaps {
   const { sizeX, sizeZ, seaLevel } = g.cfg;
   const topBlock = new Uint8Array(sizeX * sizeZ);
+  const canopy = new Uint8Array(sizeX * sizeZ);
+  for (let z = 0; z < sizeZ; z++)
+    for (let x = 0; x < sizeX; x++) {
+      const i = x + z * sizeX;
+      let y = g.height[i] + 14; // árvores não passam de ~12 blocos acima do chão
+      while (y > g.height[i] && (g.voxels.get(x, y, z) === Block.AIR || g.voxels.get(x, y, z) === Block.WATER)) y--;
+      canopy[i] = y;
+    }
   for (let z = 0; z < sizeZ; z++)
     for (let x = 0; x < sizeX; x++) topBlock[x + z * sizeX] = g.voxels.get(x, g.height[x + z * sizeX], z);
   return {
     sizeX, sizeZ, seaLevel, height: g.height, waterTop: g.waterTop, biome: g.biome,
     temperature: g.temperature, humidity: g.humidity, topBlock,
+    canopy,
     trees: g.trees.filter((t) => t.kind !== 'cacto').map((t) => ({ x: t.x, z: t.z })),
   };
 }
@@ -79,6 +90,16 @@ export class SimWorld {
 
   isWater(i: number): boolean {
     return this.maps.waterTop[i] > this.maps.height[i];
+  }
+
+  /** onde um pássaro pousa (topo da copa ou do chão); sobre a água devolve a superfície */
+  perchY(i: number): number {
+    return Math.max(this.maps.canopy[i], this.maps.waterTop[i]) + 1;
+  }
+
+  /** faixa onde um peixe pode nadar na coluna i: [fundo, superfície] */
+  swimRange(i: number): [number, number] {
+    return [this.maps.height[i] + 1.25, this.maps.waterTop[i] + 0.75];
   }
 
   /** altura onde a criatura pisa (topo do bloco sólido) */

@@ -22,10 +22,12 @@ export function makeMaps(): WorldMaps {
     humidity: new Float32Array(N).fill(0.6),
     topBlock: new Uint8Array(N).fill(Block.GRASS),
     trees: [{ x: 50, z: 50 }],
+    // copa: o chão, com uma árvore de 6 blocos em (50, 50)
+    canopy: height.map((h, i) => (i === 50 + 50 * S ? h + 6 : h)),
   };
 }
 
-export const OUT = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5 };
+export const OUT = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5, vertical: 6 };
 
 /** cérebro sem pesos, só com os vieses das saídas: comportamento fixo */
 export function fixedBrain(bias: Partial<Record<keyof typeof OUT, number>>): Brain {
@@ -33,7 +35,7 @@ export function fixedBrain(bias: Partial<Record<keyof typeof OUT, number>>): Bra
   b.w1.fill(0);
   b.w2.fill(0);
   const NH = BRAIN_SHAPE.hidden;
-  const all = { turn: 0, speed: -5, eat: -5, drink: -5, sleep: -5, mate: -5, ...bias };
+  const all = { turn: 0, speed: -5, eat: -5, drink: -5, sleep: -5, mate: -5, vertical: 0, ...bias };
   for (const [k, v] of Object.entries(all)) b.w2[OUT[k as keyof typeof OUT] * (NH + 1) + NH] = v;
   return b;
 }

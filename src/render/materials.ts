@@ -42,10 +42,14 @@ export function createTerrainMaterial(grass: { value: THREE.Texture }, worldSize
         '#include <color_fragment>',
         /* glsl */ `#include <color_fragment>
   // grama comida: o topo do bloco vai do verde ao marrom-palha conforme a simulação
-  if (vGrass > 0.5) {
-    float amount = texture2D(uGrass, (floor(vWPos.xz) + 0.5) / uWorldSize).r;
+  vec2 plants = texture2D(uGrass, (floor(vWPos.xz) + 0.5) / uWorldSize).rg;
+  if (vGrass > 0.75) {
     vec3 dry = vec3(0.36, 0.27, 0.11); // palha (em linear)
-    diffuseColor.rgb = mix(dry, diffuseColor.rgb, 0.2 + 0.8 * amount);
+    diffuseColor.rgb = mix(dry, diffuseColor.rgb, 0.2 + 0.8 * plants.r);
+  } else if (vGrass > 0.25) {
+    // algas no fundo da água: o chão fica verde-escuro conforme a quantidade
+    vec3 algae = vec3(0.05, 0.22, 0.06);
+    diffuseColor.rgb = mix(diffuseColor.rgb, algae, 0.75 * plants.g);
   }
   // bloco ao qual este pixel pertence (anda um pouco para dentro da face)
   vec3 cell = floor(vWPos - vWN * 0.01);

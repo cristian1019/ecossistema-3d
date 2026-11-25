@@ -11,8 +11,13 @@ export const enum Species {
   DEER = 1,
   WOLF = 2,
   FOX = 3,
+  FISH = 4,
+  BIRD = 5,
 }
-export const SPECIES_COUNT = 4;
+export const SPECIES_COUNT = 6;
+
+/** onde a espécie vive e se move */
+export type Medium = 'land' | 'water' | 'air';
 
 export interface SpeciesConfig {
   id: Species;
@@ -22,6 +27,14 @@ export interface SpeciesConfig {
   chart: string;
   /** o que come: plantas (herbívoro) ou carne (predador) */
   diet: 'plants' | 'meat';
+  /** terra (anda), água (nada em 3D) ou ar (voa e pousa) */
+  medium: Medium;
+  /** eficiência ao comer algas (só peixes) */
+  algaeEff: number;
+  /** onívoros: só comem fruta com energia abaixo desta fração */
+  fruitHunger: number;
+  /** come indivíduos MENORES da própria espécie (peixe grande come peixe pequeno) */
+  cannibal: boolean;
   /** espécies que caça (só predadores) */
   prey: Species[];
   /** multiplicador do metabolismo basal (carnívoros passam muito tempo parados entre refeições) */
@@ -60,6 +73,7 @@ export const SPECIES: SpeciesConfig[] = [
     plural: 'Coelhos',
     chart: '#d9a066',
     diet: 'plants',
+    medium: 'land', algaeEff: 0, fruitHunger: 0.98, cannibal: false,
     basal: 1,
     invest: 0.5,
     readyEnergy: 0.4,
@@ -85,6 +99,7 @@ export const SPECIES: SpeciesConfig[] = [
     plural: 'Cervos',
     chart: '#8f5a34',
     diet: 'plants',
+    medium: 'land', algaeEff: 0, fruitHunger: 0.98, cannibal: false,
     basal: 1,
     invest: 0.5,
     readyEnergy: 0.4,
@@ -110,12 +125,13 @@ export const SPECIES: SpeciesConfig[] = [
     plural: 'Lobos',
     chart: '#9aa3ad',
     diet: 'meat',
+    medium: 'land', algaeEff: 0, fruitHunger: 0.5, cannibal: false,
     basal: 0.3,
     // predador investe menos no parto e amamenta depois (filhote não caça)
     invest: 0.3,
     readyEnergy: 0.3,
     // caça cervos (grandes: precisa da alcateia) e coelhos
-    prey: [Species.DEER, Species.RABBIT],
+    prey: [Species.DEER, Species.RABBIT, Species.BIRD], // pássaros só quando pousados no chão
     mass: 4,
     genes: {
       size: 1, speed: 7, vision: 28, metabolism: 1, fur: 0.55,
@@ -134,11 +150,12 @@ export const SPECIES: SpeciesConfig[] = [
     plural: 'Raposas',
     chart: '#e07a2e',
     diet: 'meat',
+    medium: 'land', algaeEff: 0, fruitHunger: 0.5, cannibal: false,
     basal: 0.3,
     // predador investe menos no parto e amamenta depois (filhote não caça)
     invest: 0.3,
     readyEnergy: 0.3,
-    prey: [Species.RABBIT],
+    prey: [Species.RABBIT, Species.BIRD], // pássaros só quando pousados no chão
     mass: 1.5,
     genes: {
       size: 1, speed: 7.5, vision: 24, metabolism: 1.1, fur: 0.4,
@@ -151,6 +168,55 @@ export const SPECIES: SpeciesConfig[] = [
     initialCount: 20,
     groupSize: 3, // casal + 1
     homes: [Biome.PLAINS, Biome.FOREST],
+  },
+  {
+    id: Species.FISH,
+    name: 'Peixe',
+    plural: 'Peixes',
+    chart: '#4aa3d8',
+    diet: 'plants',
+    medium: 'water', algaeEff: 1, fruitHunger: 0.98,
+    // peixe grande come peixe pequeno (menor que 70% do tamanho dele)
+    cannibal: true,
+    prey: [Species.FISH],
+    basal: 0.7, // animal de sangue frio gasta menos
+    invest: 0.4,
+    readyEnergy: 0.4,
+    mass: 0.5,
+    genes: {
+      size: 1, speed: 4, vision: 10, metabolism: 1, fur: 0.3,
+      maxAge: 6 * DAY_LENGTH, litter: 5, r: 0.45, g: 0.6, b: 0.72,
+    },
+    gestation: 40, // ovos
+    maxStep: 0,
+    grassEff: 0, grazeMin: 1, fruitEff: 0, browseEff: 0,
+    initialCount: 260,
+    groupSize: 13, // cardumes
+    homes: [],
+  },
+  {
+    id: Species.BIRD,
+    name: 'Pássaro',
+    plural: 'Pássaros',
+    chart: '#c96fd6',
+    diet: 'meat',
+    // come frutas e sementes à vontade e pesca peixes que chegam perto da superfície
+    medium: 'air', algaeEff: 0, fruitHunger: 0.98, cannibal: false,
+    prey: [Species.FISH],
+    basal: 0.8,
+    invest: 0.4,
+    readyEnergy: 0.4,
+    mass: 0.4,
+    genes: {
+      size: 1, speed: 9, vision: 26, metabolism: 1.2, fur: 0.5,
+      maxAge: 8 * DAY_LENGTH, litter: 3, r: 0.36, g: 0.42, b: 0.58,
+    },
+    gestation: 50, // ovos no ninho
+    maxStep: 99,
+    grassEff: 0, grazeMin: 1, fruitEff: 1, browseEff: 0,
+    initialCount: 120,
+    groupSize: 8, // bandos
+    homes: [Biome.FOREST, Biome.PLAINS],
   },
 ];
 
@@ -170,16 +236,23 @@ export const INPUT_LABELS = [
   'fome', 'sede', 'cansaço', 'frio', 'é noite?',
   'subida à frente', 'bloqueado à frente', 'constante',
 ];
-export const OUTPUT_LABELS = ['virar', 'acelerar', 'comer', 'beber', 'dormir', 'acasalar'];
-/** mesmo cérebro para todas as espécies: 23 → 12 → 6 */
-export const BRAIN_SHAPE = { inputs: INPUT_LABELS.length, hidden: 12, outputs: OUTPUT_LABELS.length };
+export const OUTPUT_LABELS = ['virar', 'acelerar', 'comer', 'beber', 'dormir', 'acasalar', 'subir/descer'];
+/** mesmo cérebro para todas as espécies: 23 → 14 → 7 */
+export const BRAIN_SHAPE = { inputs: INPUT_LABELS.length, hidden: 14, outputs: OUTPUT_LABELS.length };
 
 /** para predadores, "comida" é a presa e "comer" é atacar/comer carne */
 export function inputLabels(species: Species): string[] {
-  if (SPECIES[species].diet === 'plants') return INPUT_LABELS;
-  return INPUT_LABELS.map((l) => l.replace('comida', 'presa').replace('predador', 'ameaça'));
+  const cfg = SPECIES[species];
+  let labels = cfg.diet === 'plants' ? [...INPUT_LABELS] : INPUT_LABELS.map((l) => l.replace('comida', 'presa').replace('predador', 'ameaça'));
+  // para quem nada ou voa, a entrada 20 é a altura (fundo/chão = -1, superfície/alto = +1)
+  if (cfg.medium !== 'land') labels = labels.map((l, i) => (i === 20 ? 'altura' : l));
+  return labels;
 }
 export function outputLabels(species: Species): string[] {
-  if (SPECIES[species].diet === 'plants') return OUTPUT_LABELS;
-  return OUTPUT_LABELS.map((l) => (l === 'comer' ? 'atacar' : l));
+  const cfg = SPECIES[species];
+  return OUTPUT_LABELS.map((l, i) => {
+    if (i === 2 && cfg.diet === 'meat') return 'atacar';
+    if (i === 6 && cfg.medium === 'land') return '(sem uso)';
+    return l;
+  });
 }

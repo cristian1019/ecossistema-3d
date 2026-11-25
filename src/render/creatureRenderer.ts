@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { FLAG, SNAP } from '../workers/simProtocol';
 
 type ColorMode = 'body' | 'dark' | 'light' | number;
-type Kind = 'none' | 'head' | 'legF' | 'legB' | 'ear' | 'male';
+type Kind = 'none' | 'head' | 'legF' | 'legB' | 'ear' | 'male' | 'wing' | 'tail' | 'perchLeg';
 
 interface PartDef {
   size: [number, number, number];
@@ -84,11 +84,35 @@ const FOX: PartDef[] = [
   ...pair({ size: [0.1, 0.36, 0.1], pos: [-0.28, 0.18, 0.11], color: 0x2a1c14, kind: 'legB' }),
 ];
 
+// peixe: nada com o centro do corpo na altura y (o modelo é centrado em 0)
+const FISH: PartDef[] = [
+  { size: [0.62, 0.3, 0.18], pos: [0, 0, 0], color: 'body', far: true },
+  { size: [0.2, 0.22, 0.14], pos: [0.36, 0, 0], color: 'body', far: true },
+  { size: [0.22, 0.3, 0.05], pos: [-0.42, 0, 0], color: 'dark', kind: 'tail' }, // cauda que balança
+  { size: [0.24, 0.12, 0.04], pos: [0, 0.19, 0], color: 'dark' }, // nadadeira dorsal
+  { size: [0.4, 0.08, 0.16], pos: [0, -0.12, 0], color: 'light' }, // barriga clara
+  ...pair({ size: [0.05, 0.06, 0.03], pos: [0.36, 0.04, 0.08], color: 0x111111 }),
+];
+
+// pássaro: corpo apoiado em y (pousado) e asas que batem quando voa
+const BIRD: PartDef[] = [
+  { size: [0.5, 0.3, 0.3], pos: [0, 0.32, 0], color: 'body', far: true },
+  { size: [0.24, 0.24, 0.24], pos: [0.3, 0.48, 0], color: 'body', far: true },
+  { size: [0.16, 0.06, 0.08], pos: [0.48, 0.46, 0], color: 0xe8a23a }, // bico
+  ...pair({ size: [0.04, 0.05, 0.05], pos: [0.4, 0.53, 0.1], color: 0x111111 }),
+  { size: [0.4, 0.1, 0.24], pos: [0, 0.24, 0], color: 'light' }, // peito claro
+  ...pair({ size: [0.34, 0.05, 0.5], pos: [0, 0.38, 0.4], color: 'dark', kind: 'wing', far: true }),
+  { size: [0.3, 0.05, 0.22], pos: [-0.36, 0.34, 0], color: 'dark' }, // cauda
+  ...pair({ size: [0.04, 0.16, 0.04], pos: [0.02, 0.08, 0.07], color: 0xe8a23a, kind: 'perchLeg' }),
+];
+
 /** altura da cabeça (para a câmera "olhos do bicho") e do marcador, por espécie */
-export const HEAD_HEIGHT = [0.75, 1.85, 1.05, 0.78];
-const MARKER_TOP = [1.3, 2.6, 1.5, 1.2];
+export const HEAD_HEIGHT = [0.75, 1.85, 1.05, 0.78, 0.05, 0.5];
+const MARKER_TOP = [1.3, 2.6, 1.5, 1.2, 0.6, 1.0];
 /** quanto a cabeça desce ao comer/beber */
-const HEAD_DROP = [0.22, 0.75, 0.45, 0.3];
+const HEAD_DROP = [0.22, 0.75, 0.45, 0.3, 0, 0.15];
+/** espécies sem sombra "blob" no chão (peixe na água; pássaro voando é tratado à parte) */
+const NO_SHADOW = [false, false, false, false, true, false];
 
 /** modelo + escala base de cada espécie (índice = Species) */
 const SPECIES_MODELS: { parts: PartDef[]; scale: number; shadow: number }[] = [
@@ -96,6 +120,8 @@ const SPECIES_MODELS: { parts: PartDef[]; scale: number; shadow: number }[] = [
   { parts: DEER, scale: 1.0, shadow: 1.5 },
   { parts: WOLF, scale: 0.95, shadow: 1.3 },
   { parts: FOX, scale: 0.75, shadow: 0.9 },
+  { parts: FISH, scale: 0.8, shadow: 0 },
+  { parts: BIRD, scale: 0.8, shadow: 0.6 },
 ];
 
 const MAX = 2000;
@@ -259,6 +285,7 @@ export class CreatureRenderer {
       const sleeping = (flags & FLAG.SLEEP) !== 0;
       const headDown = (flags & (FLAG.EAT | FLAG.DRINK | FLAG.NURSE)) !== 0;
       const lunge = (flags & FLAG.ATTACK) !== 0;
+      const flying = (flags & FLAG.FLY) !== 0;
       const male = (flags & FLAG.MALE) !== 0;
       // passada: fase avança com a velocidade; cada bicho tem sua própria fase (id)
       const anim = animate && !far;
@@ -281,6 +308,7 @@ export class CreatureRenderer {
         if (far && !part.far) continue;
         if (part.kind === 'male' && !male) continue;
         if (sleeping && (part.kind === 'legF' || part.kind === 'legB')) continue;
+        if (flying && part.kind === 'perchLeg') continue; // patinhas recolhidas no voo
         const mesh = sp.meshes[pi];
         const n = sp.partCount[pi]++;
         let px = part.pos[0], py = part.pos[1];
@@ -295,6 +323,24 @@ export class CreatureRenderer {
           this.local.makeTranslation(px, py + h / 2, part.pos[2]);
           if (ang !== 0) { this.tmp.makeRotationAxis(this.zAxis, ang); this.local.multiply(this.tmp); }
           this.tmp.makeTranslation(0, -h / 2, 0);
+          this.local.multiply(this.tmp);
+        } else if (part.kind === 'wing') {
+          // asas: batem em volta do ombro (eixo X) quando voa; dobradas junto ao corpo quando pousa
+          const side = part.pos[2] > 0 ? 1 : -1;
+          const flap = flying ? (animate ? Math.sin(time * 14 + id) * 0.9 : 0.3) : 0;
+          const reach = flying ? 1 : 0.35;
+          this.local.makeTranslation(px, py, side * 0.15);
+          this.tmp.makeRotationX(side * flap);
+          this.local.multiply(this.tmp);
+          this.tmp.makeTranslation(0, 0, side * (part.pos[2] - 0.15) * reach);
+          this.local.multiply(this.tmp);
+          if (!flying) { this.tmp.makeScale(1, 1, 0.45); this.local.multiply(this.tmp); }
+        } else if (part.kind === 'tail' && anim) {
+          // cauda do peixe balança de um lado para o outro
+          this.local.makeTranslation(px + 0.1, py, part.pos[2]);
+          this.tmp.makeRotationY(Math.sin(time * (6 + speed * 3) + id) * 0.5);
+          this.local.multiply(this.tmp);
+          this.tmp.makeTranslation(-0.1, 0, 0);
           this.local.multiply(this.tmp);
         } else if (part.kind === 'ear' && anim) {
           this.local.makeTranslation(px, py, part.pos[2]);
@@ -314,7 +360,8 @@ export class CreatureRenderer {
         else mesh.setColorAt(n, this.c2.setHex(part.color));
       }
 
-      // sombra no chão
+      // sombra no chão (não para peixes nem pássaros voando)
+      if (NO_SHADOW[species] || flying) continue;
       const ss = scale * model.shadow;
       this.m.makeScale(ss * 1.3, 1, ss);
       this.tmp.makeRotationY(-yaw);

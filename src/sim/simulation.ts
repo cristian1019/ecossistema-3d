@@ -19,12 +19,12 @@ import { forward, randomBrain } from './neural';
 import { instinctBrain } from './instincts';
 import { makeChild, mutateGenes, mutatedCopy, type Genes, type Genome } from './genome';
 import { BRAIN_SHAPE, SPECIES, SPECIES_COUNT, type Species, type SpeciesConfig } from './species';
-import { BROWSE_ENERGY, FRUIT_ENERGY, GRASS_ENERGY, Plants, type Bush } from './plants';
+import { ALGAE_ENERGY, BROWSE_ENERGY, FRUIT_ENERGY, GRASS_ENERGY, Plants, type Bush } from './plants';
 import { SimWorld, type WorldMaps } from './simWorld';
 
 /** duração de um passo de simulação (s). 5 passos por segundo de simulação. */
 export const DT = 0.2;
-export const MAX_CREATURES = 2000;
+export const MAX_CREATURES = 3000;
 const TURN_RATE = 3; // rad/s com a saída "virar" no máximo
 /** o chamado de acasalamento é ouvido a MATE_CALL × visão */
 const MATE_CALL = 3;
@@ -103,6 +103,8 @@ export interface Creature {
   attacking: boolean;
   /** mamando (filhote recebendo energia da mãe) */
   nursing: boolean;
+  /** (pássaros) pousado num galho ou no chão; voando = false */
+  landed: boolean;
   attackCd: number;
   /** camuflagem atual (cor do corpo contra o chão onde está), 0..1 */
   camo: number;
@@ -259,7 +261,7 @@ export class Simulation {
       // amadurecer: 15% da vida; metabolismo alto acelera
       maturity: (0.15 * g.maxAge) / Math.sqrt(g.metabolism),
       generation: 1, mother: 0, father: 0, children: 0, childIds: [],
-      sleeping: false, eating: false, drinking: false, wantsMate: false, courting: false, attacking: false, nursing: false, attackCd: 0, camo: 0,
+      sleeping: false, eating: false, drinking: false, wantsMate: false, courting: false, attacking: false, nursing: false, landed: false, attackCd: 0, camo: 0,
       pregnant: null, cooldown: 0,
       alive: true, cause: null,
       input: new Float32Array(BRAIN_SHAPE.inputs),
@@ -271,14 +273,32 @@ export class Simulation {
       },
       ...opts,
     };
+    this.placeVertically(c);
     this.creatures.push(c);
     this.byId.set(c.id, c);
     return c;
   }
 
+  /** Ajusta a altura inicial conforme o meio: peixe no meio da água, pássaro pousado. */
+  private placeVertically(c: Creature): void {
+    const i = this.world.idx(c.x, c.z);
+    if (c.cfg.medium === 'water') {
+      const [lo, hi] = this.world.swimRange(i);
+      c.y = (lo + hi) / 2;
+    } else if (c.cfg.medium === 'air') {
+      c.y = this.world.perchY(i);
+      c.landed = true;
+    }
+  }
+
   /** Sorteia uma célula de chão com grama dentro de um dos biomas preferidos da espécie. */
   private homeCell(species: Species): number {
     const cfg = SPECIES[species];
+    // peixes nascem em água rasa com algas
+    if (cfg.medium === 'water') {
+      const ac = this.plants.algaeCells;
+      return ac.length ? ac[this.rng.int(0, ac.length - 1)] : -1;
+    }
     const cells = this.plants.grassCells;
     for (let t = 0; t < 400 && cells.length > 0; t++) {
       const i = cells[this.rng.int(0, cells.length - 1)];
@@ -301,7 +321,8 @@ export class Simulation {
     for (let k = 0; k < n; k++) {
       for (let t = 0; t < 30; t++) {
         const x = cx + this.rng.gauss() * 4 + 0.5, z = cz + this.rng.gauss() * 4 + 0.5;
-        if (!w.inside(x, z) || w.isWater(w.idx(x, z))) continue;
+        const aquatic = SPECIES[species].medium === 'water';
+        if (!w.inside(x, z) || w.isWater(w.idx(x, z)) !== aquatic) continue;
         const c = this.addCreature(species, genome(k) ?? this.randomGenome(species), x, z);
         if (!c) return out;
         c.age = c.maturity + this.rng.next() * (c.genome.genes.maxAge * 0.4);
@@ -368,7 +389,9 @@ export class Simulation {
 
     // ---- temperatura e conforto térmico ----
     // pelagem grossa e corpo grande aguentam mais frio; pelagem grossa sofre no calor
-    const T = w.airTemp(i, night);
+    const medium = c.cfg.medium;
+    // na água a temperatura varia bem menos que no ar
+    const T = medium === 'water' ? 0.5 * w.airTemp(i, night) + 7 : w.airTemp(i, night);
     c.temp = T;
     // regra de Bergmann: corpo pequeno tem mais superfície por volume e perde mais calor
     const comfortMin = 14 - 26 * g.fur - 8 * (g.size - 1);
@@ -427,10 +450,12 @@ export class Simulation {
         if (c.cfg.diet === 'meat') this.tryHunt(c, dt);
         else this.tryEat(c, i, dt);
       }
-      if (out[3] > 0) this.tryDrink(c, i, dt);
+      if (out[3] > 0 && medium !== 'water') this.tryDrink(c, i, dt);
       if ((c.eating || c.drinking) && !c.attacking) sp *= 0.2;
-      v = sp;
-      this.move(c, i, v * dt);
+      v = this.moveBy(c, i, sp, out[6], dt);
+    } else if (medium === 'air' && !c.landed) {
+      // dormiu voando: plana para baixo até pousar
+      v = this.moveBy(c, i, 1, -1, dt);
     }
     c.v = v;
 
@@ -447,8 +472,11 @@ export class Simulation {
     // cérebro e olhos têm custo FIXO por indivíduo (não diminuem com o corpo);
     // sem isso a evolução encolhe os bichos sem limite (nanismo)
     burn += 0.1 + 0.004 * g.vision;
+    // bater asas custa caro: voar gasta mais que andar
+    if (medium === 'air' && !c.landed) burn += 0.35 * m;
     c.energy -= burn * dt;
-    c.hydration -= (dt / 600) * (1 + heat) * (v > 0.5 ? 1.2 : 1);
+    if (medium === 'water') c.hydration = 1; // peixe não passa sede
+    else c.hydration -= (dt / 600) * (1 + heat) * (v > 0.5 ? 1.2 : 1);
     if (c.sleeping) c.fatigue -= (dt / 170) * g.metabolism;
     else c.fatigue += (dt / 650) * (1 + (0.5 * v) / g.speed) * (1 + 0.4 * night);
     c.fatigue = clamp(c.fatigue, 0, 1);
@@ -456,7 +484,8 @@ export class Simulation {
 
     // ---- amamentação: filhote pequeno perto da mãe recebe energia dela ----
     c.nursing = false;
-    if (c.age < c.maturity * 0.5 && c.energy < c.maxEnergy * 0.35) this.nurse(c, dt);
+    // (peixes nascem de ovos e se viram sozinhos; pássaros alimentam os filhotes no ninho)
+    if (medium !== 'water' && c.age < c.maturity * 0.5 && c.energy < c.maxEnergy * 0.35) this.nurse(c, dt);
 
     // ---- 5: reprodução ----
     if (c.pregnant) {
@@ -476,7 +505,7 @@ export class Simulation {
   private foodAt(c: Creature, j: number): number {
     if (c.cfg.diet === 'meat') return 0;
     const grass = Math.max(0, this.plants.grass[j] - c.cfg.grazeMin);
-    return grass * c.cfg.grassEff + this.plants.browse[j] * c.cfg.browseEff;
+    return grass * c.cfg.grassEff + this.plants.browse[j] * c.cfg.browseEff + this.plants.algae[j] * c.cfg.algaeEff;
   }
 
   /**
@@ -554,7 +583,7 @@ export class Simulation {
             // outra espécie: presa (se eu caço ela) ou predador (se ela me caça).
             // CAMUFLAGEM: quem tem a cor parecida com o chão só é notado mais de perto;
             // andar rápido denuncia (a camuflagem vale menos em movimento)
-            const isPrey = hunts[o.species], isPred = HUNTS[o.species][c.species];
+            const isPrey = hunts[o.species] && this.canReach(c, o), isPred = HUNTS[o.species][c.species] && this.canReach(o, c);
             if (!isPrey && !isPred) continue;
             const hidden = o.camo * (o.v > 1.5 ? 0.4 : 1);
             const seen = vision * (1 - CAMO_STRENGTH * hidden);
@@ -562,6 +591,12 @@ export class Simulation {
             if (isPrey && d < pd) { pd = d; prey = o; }
             if (isPred && d < qd) { qd = d; pred = o; }
             continue;
+          }
+          // mesma espécie e canibal (peixe): o bem menor é presa; o bem maior é predador
+          if (c.cfg.cannibal && d <= vision * vision) {
+            const so = o.genome.genes.size, sc = c.genome.genes.size;
+            if (so < sc * 0.7 && d < pd) { pd = d; prey = o; }
+            else if (sc < so * 0.7 && d < qd) { qd = d; pred = o; }
           }
           if (d < fd) { fd = d; friend = o; }
           // parceiro só conta se estiver PRONTO (senão a fêmea mira um macho que não pode acasalar)
@@ -614,9 +649,17 @@ export class Simulation {
     inp[18] = Math.min(1, c.coldStress);
     inp[19] = night;
 
-    // --- terreno à frente ---
+    // --- terreno à frente (ou altura, para quem nada/voa) ---
     const ax = c.x + Math.cos(c.yaw) * 1.5, az = c.z + Math.sin(c.yaw) * 1.5;
-    if (w.inside(ax, az)) {
+    if (c.cfg.medium === 'water') {
+      // altura na coluna de água: -1 no fundo, +1 na superfície
+      const [lo, hi] = w.swimRange(i);
+      inp[20] = hi > lo ? clamp(((c.y - lo) / (hi - lo)) * 2 - 1, -1, 1) : 0;
+      inp[21] = !w.inside(ax, az) || !w.isWater(w.idx(ax, az)) ? 1 : 0; // margem à frente
+    } else if (c.cfg.medium === 'air') {
+      // altura de voo: -1 pousado, 0 a 10 blocos, +1 a 20 blocos ou mais
+      inp[20] = c.landed ? -1 : clamp((c.y - w.perchY(i)) / 10 - 1, -1, 1);
+    } else if (w.inside(ax, az)) {
       const ai = w.idx(ax, az);
       const dh = w.maps.height[ai] - w.maps.height[i];
       inp[20] = clamp(dh / 2, -1, 1);
@@ -638,6 +681,7 @@ export class Simulation {
 
   /** come fruta do arbusto-alvo se ele estiver ao alcance; devolve true se estava */
   private eatFruit(c: Creature, dt: number): boolean {
+    if (c.cfg.medium === 'air' && !c.landed) return false; // pássaro precisa pousar para comer
     const reach = 1.3 + c.genome.genes.size * 0.3;
     const b = c.targets.bush;
     if (!b || b.fruit < 1 || (b.x + 0.5 - c.x) ** 2 + (b.z + 0.5 - c.z) ** 2 > reach * reach) return false;
@@ -655,8 +699,18 @@ export class Simulation {
     if (c.energy >= c.maxEnergy * 0.98) return;
     const g = c.genome.genes;
     if (this.eatFruit(c, dt)) return;
+    // peixe grande com fome come peixe pequeno ao alcance
+    if (c.cfg.cannibal && c.energy < c.maxEnergy * 0.7 && this.attack(c)) return;
     // mordida ∝ massa (bicho grande come mais por bocada), digestão ∝ √metabolismo
     const bite = 0.5 * c.mass * Math.sqrt(g.metabolism) * dt;
+    if (c.cfg.algaeEff > 0) {
+      const got = this.plants.eatAlgae(i, bite);
+      if (got > 0.001) {
+        c.eating = true;
+        c.energy = Math.min(c.maxEnergy, c.energy + got * ALGAE_ENERGY * c.cfg.algaeEff);
+      }
+      return;
+    }
     // come o que render mais nesta célula: grama ou folhas de árvore
     const p = this.plants;
     // grama abaixo da altura mínima de pastejo da espécie não dá para morder
@@ -692,14 +746,22 @@ export class Simulation {
       c.eating = true;
       return;
     }
-    const p = t.prey;
-    const r = p ? reach + p.genome.genes.size * 0.4 : 0;
-    if (!p || !p.alive || c.attackCd > 0 || (p.x - c.x) ** 2 + (p.z - c.z) ** 2 > r * r) {
-      // onívoro (raposa): sem presa ao alcance, come frutas
-      // (só com fome de verdade: fruta é o "plano B", não a dieta principal)
-      if (c.cfg.fruitEff > 0 && c.energy < c.maxEnergy * 0.5) this.eatFruit(c, dt);
-      return;
-    }
+    if (this.attack(c)) return;
+    // onívoro (raposa, pássaro): sem presa ao alcance, come frutas
+    // (a raposa só com fome de verdade: para ela a fruta é o "plano B")
+    if (c.cfg.fruitEff > 0 && c.energy < c.maxEnergy * c.cfg.fruitHunger) this.eatFruit(c, dt);
+  }
+
+  /**
+   * Tenta atacar a presa-alvo. Devolve false se não havia presa ao alcance.
+   * Em 3D (peixes, pássaros) a distância vertical também conta.
+   */
+  private attack(c: Creature): boolean {
+    const p = c.targets.prey;
+    if (!p || !p.alive || c.attackCd > 0) return false;
+    const r = 1.2 + c.genome.genes.size * 0.5 + p.genome.genes.size * 0.4;
+    const dy = c.cfg.medium === 'land' && p.cfg.medium === 'land' ? 0 : p.y - c.y;
+    if ((p.x - c.x) ** 2 + (p.z - c.z) ** 2 + dy * dy > r * r) return false;
     c.attacking = true;
     c.attackCd = ATTACK_COOLDOWN;
     c.energy -= c.maxEnergy * 0.01; // o bote cansa
@@ -710,21 +772,38 @@ export class Simulation {
     });
     let chance = ATTACK_BASE * Math.sqrt(c.mass / p.mass) + PACK_BONUS * Math.min(3, pack);
     if (p.sleeping) chance += 0.4;
-    if (this.rng.next() >= Math.min(0.95, chance)) return;
-    // pegou: a presa morre e vira carcaça (que a alcateia pode dividir)
+    if (this.rng.next() >= Math.min(0.95, chance)) return true;
     this.kill(p, 'predação');
     this.kills[c.species]++;
+    if (c.cfg.medium !== 'land') {
+      // peixe e pássaro engolem a presa inteira (não sobra carcaça)
+      c.energy = Math.min(c.maxEnergy, c.energy + p.mass * MEAT_PER_MASS * 0.6);
+      c.eating = true;
+      return true;
+    }
+    // pegou: a presa morre e vira carcaça (que a alcateia pode dividir)
     this.carcasses.push({
       id: this.nextCarcassId++, x: p.x, z: p.z, y: p.y, species: p.species,
       meat: p.mass * MEAT_PER_MASS, max: p.mass * MEAT_PER_MASS,
     });
+    return true;
   }
 
   /**
-   * Amamentação: na primeira metade da infância, o filhote a menos de 8 blocos da mãe
-   * recebe até 0,5% da energia máxima DELA por segundo, até ficar com 35% (filhote é pequeno).
-   * A mãe paga, e para de amamentar se cair abaixo de 30% (senão a ninhada a mata de fome). Sem isso, filhotes de predador, que ainda não sabem caçar, morrem de fome.
+   * O predador consegue alcançar a presa pelo meio em que cada um está?
+   *  - bicho de terra só pega pássaro POUSADO no chão (não no alto da árvore);
+   *  - pássaro só pega peixe perto da superfície (até 1,5 bloco de profundidade).
    */
+  private canReach(pred: Creature, prey: Creature): boolean {
+    const pm = pred.cfg.medium, qm = prey.cfg.medium;
+    if (qm === 'air' && pm === 'land') return prey.landed && prey.y - this.world.groundY(prey.x, prey.z) < 1.5;
+    if (qm === 'water' && pm === 'air') {
+      const top = this.world.maps.waterTop[this.world.idx(prey.x, prey.z)] + 1;
+      return prey.y > top - 1.5;
+    }
+    return pm === qm || (pm === 'land' && qm === 'land');
+  }
+
   /** vira o filhote na direção da mãe se ela estiver a mais de 3 blocos; true se virou */
   private followMother(c: Creature, dt: number): boolean {
     const m = this.byId.get(c.mother);
@@ -736,6 +815,12 @@ export class Simulation {
     return true;
   }
 
+  /**
+   * Amamentação: na primeira metade da infância, o filhote a menos de 8 blocos da mãe
+   * recebe até 0,5% da energia máxima DELA por segundo, até ficar com 35% (filhote é pequeno).
+   * A mãe paga, e para se cair abaixo de 30% (senão a ninhada a mata de fome).
+   * Sem isso, filhotes de predador, que ainda não sabem caçar, morrem de fome.
+   */
   private nurse(c: Creature, dt: number): void {
     const m = this.byId.get(c.mother);
     if (!m || !m.alive || m.energy < m.maxEnergy * 0.3) return;
@@ -757,6 +842,43 @@ export class Simulation {
     if (d > 1.7) return;
     c.drinking = true;
     c.hydration = Math.min(1, c.hydration + 0.35 * dt);
+  }
+
+  /**
+   * Move conforme o meio e devolve a velocidade horizontal efetiva.
+   * @param vert saída "subir/descer" do cérebro (-1..1), usada por quem nada ou voa
+   */
+  private moveBy(c: Creature, i: number, speed: number, vert: number, dt: number): number {
+    const medium = c.cfg.medium;
+    if (medium === 'land') { this.move(c, i, speed * dt); return speed; }
+    const w = this.world;
+    if (medium === 'water') {
+      // nada em 3D, mas nunca sai da água (bloqueia na margem)
+      const nx = c.x + Math.cos(c.yaw) * speed * dt, nz = c.z + Math.sin(c.yaw) * speed * dt;
+      let ni = i;
+      if (w.inside(nx, nz) && w.isWater(w.idx(nx, nz))) { c.x = nx; c.z = nz; ni = w.idx(nx, nz); } else speed = 0;
+      const [lo, hi] = w.swimRange(ni);
+      c.y = clamp(c.y + vert * 2 * dt, lo, Math.max(lo, hi));
+      return speed;
+    }
+    // ar: pousado, só decola se o cérebro mandar subir; voando, sobe/desce e pousa ao tocar a copa/chão
+    if (c.landed) {
+      if (vert > 0.3 && !c.sleeping) { c.landed = false; c.y += 0.5; return speed; }
+      // pousado: anda devagar pelo chão (pulinhos)
+      const nx = c.x + Math.cos(c.yaw) * speed * 0.2 * dt, nz = c.z + Math.sin(c.yaw) * speed * 0.2 * dt;
+      if (w.inside(nx, nz) && !w.isWater(w.idx(nx, nz))) { c.x = nx; c.z = nz; c.y = w.perchY(w.idx(nx, nz)); }
+      return speed * 0.2;
+    }
+    const nx = c.x + Math.cos(c.yaw) * speed * dt, nz = c.z + Math.sin(c.yaw) * speed * dt;
+    if (w.inside(nx, nz)) { c.x = nx; c.z = nz; }
+    const ni = w.idx(c.x, c.z);
+    const floor = w.perchY(ni);
+    c.y = Math.min(floor + 25, c.y + vert * 4 * dt); // teto de voo: 25 blocos acima da copa/chão
+    if (c.y <= floor) {
+      if (w.isWater(ni)) c.y = floor + 0.3; // não pousa na água
+      else { c.y = floor; c.landed = true; }
+    }
+    return speed;
   }
 
   /** Anda `dist` blocos para a frente, se o caminho não for água nem degrau alto demais. */
@@ -819,9 +941,12 @@ export class Simulation {
       if (!child) break;
       child.energy = Math.min(child.maxEnergy, invest / n);
       child.hydration = 0.9;
-      // nasce perto da mãe; se caiu na água, fica no lugar da mãe
-      if (this.world.isWater(this.world.idx(child.x, child.z))) { child.x = mother.x; child.z = mother.z; }
-      child.y = this.world.groundY(child.x, child.z);
+      // nasce perto da mãe; se caiu no meio errado (terra/água), fica no lugar da mãe
+      const aquatic = mother.cfg.medium === 'water';
+      if (this.world.isWater(this.world.idx(child.x, child.z)) !== aquatic) { child.x = mother.x; child.z = mother.z; }
+      if (mother.cfg.medium === 'land') child.y = this.world.groundY(child.x, child.z);
+      else if (aquatic) child.y = mother.y;
+      else { child.y = this.world.perchY(this.world.idx(child.x, child.z)); child.landed = true; }
       born.push(child);
       this.births[mother.species]++;
       for (const parent of [mother, father]) {

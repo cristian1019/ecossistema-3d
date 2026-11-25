@@ -19,10 +19,10 @@ import { randomBrain, type Brain, type BrainShape } from './neural';
 const I = {
   foodSide: 0, foodNear: 2, waterSide: 3, waterNear: 5, groupSide: 12, groupNear: 14,
   predSide: 6, predNear: 8, mateSide: 9, mateNear: 11,
-  hunger: 15, thirst: 16, fatigue: 17, night: 19, blocked: 21, bias: 22,
+  hunger: 15, thirst: 16, fatigue: 17, night: 19, height: 20, blocked: 21, bias: 22,
 };
 // índices das saídas (OUTPUT_LABELS)
-const O = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5 };
+const O = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5, vertical: 6 };
 
 export function instinctBrain(shape: BrainShape, rng: Rng, diet: 'plants' | 'meat' = 'plants'): Brain {
   // ruído pequeno em todos os pesos: cada indivíduo é um pouco diferente
@@ -55,12 +55,18 @@ export function instinctBrain(shape: BrainShape, rng: Rng, diet: 'plants' | 'mea
   // neurônio 10: predador perto → corre e acorda (para predadores esta entrada
   // é a "ameaça", que começa sempre em zero, então o neurônio fica quieto)
   // (sem viés: com a entrada em zero, tanh(0) = 0 e o neurônio não interfere em nada)
-  w1(10, I.predNear, 3); w2(O.speed, 10, 2.5); w2(O.sleep, 10, -2.5); w2(O.eat, 10, -1.5);
+  w1(10, I.predNear, 3); w2(O.speed, 10, 2.5); w2(O.sleep, 10, -2.5); w2(O.eat, 10, -1.5); w2(O.vertical, 10, 2);
   if (diet === 'meat') {
     // neurônio 11 (só predadores): presa perto e com fome → PERSEGUIR (correr)
     w1(11, I.foodNear, 2.5); w1(11, I.hunger, 1); w1(11, I.bias, -0.8); w2(O.speed, 11, 3);
   }
   // (nos herbívoros o neurônio 11 fica livre, só ruído, para a evolução usar)
+
+  // neurônio 12 (quem nada ou voa): fica no meio da faixa de altura
+  // (alto demais → desce, baixo demais → sobe). Em quem anda, a saída "subir/descer" é ignorada.
+  w1(12, I.height, -2); w2(O.vertical, 12, 2);
+  // neurônio 13: comida perto, cansaço ou noite → descer (pássaro pousa para comer e dormir)
+  w1(13, I.foodNear, 2); w1(13, I.fatigue, 2); w1(13, I.night, 1); w1(13, I.bias, -2); w2(O.vertical, 13, -3);
 
   // vieses das saídas: anda em velocidade média, evita dormir à toa
   w2(O.speed, NH, 0.3);

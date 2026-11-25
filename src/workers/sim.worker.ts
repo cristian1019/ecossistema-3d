@@ -127,7 +127,7 @@ function sendFrame(): void {
     buf[o + SNAP.COLOR] = (Math.round(g.r * 255) << 16) | (Math.round(g.g * 255) << 8) | Math.round(g.b * 255);
     buf[o + SNAP.FLAGS] = (c.sleeping ? FLAG.SLEEP : 0) | (c.eating ? FLAG.EAT : 0) | (c.drinking ? FLAG.DRINK : 0) |
       (c.pregnant ? FLAG.PREGNANT : 0) | (c.sex === 1 ? FLAG.MALE : 0) | (grow < 1 ? FLAG.YOUNG : 0) |
-      (c.attacking ? FLAG.ATTACK : 0) | (c.nursing ? FLAG.NURSE : 0);
+      (c.attacking ? FLAG.ATTACK : 0) | (c.nursing ? FLAG.NURSE : 0) | (c.cfg.medium === 'air' && !c.landed ? FLAG.FLY : 0);
     buf[o + SNAP.SPEED] = c.v;
     buf[o + SNAP.AGE] = c.age / g.maxAge;
   }
@@ -167,7 +167,7 @@ function sendPlants(withGrass: boolean): void {
 
 function actionOf(c: Creature): string {
   if (!c.alive) return 'morto';
-  if (c.sleeping) return 'dormindo';
+  if (c.sleeping) return c.cfg.medium === 'air' && !c.landed ? 'descendo para dormir' : 'dormindo';
   if (c.nursing) return 'mamando';
   if (c.attacking) return 'atacando!';
   if (c.drinking) return 'bebendo';
@@ -175,6 +175,8 @@ function actionOf(c: Creature): string {
   if (c.targets.pred && c.targets.pred.alive && c.v > 3) return 'fugindo';
   if (c.cfg.diet === 'meat' && c.targets.prey && c.output[2] > 0 && c.v > 3) return 'perseguindo uma presa';
   if (c.courting) return 'indo encontrar um parceiro';
+  if (c.cfg.medium === 'water') return c.v > 0.5 ? 'nadando' : 'parado na água';
+  if (c.cfg.medium === 'air') return c.landed ? (c.v > 0.3 ? 'pulando no chão' : 'pousado') : 'voando';
   if (c.v > 0.5) return 'andando';
   return 'parado';
 }

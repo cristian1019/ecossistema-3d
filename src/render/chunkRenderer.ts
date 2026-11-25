@@ -16,7 +16,8 @@ export class ChunkRenderer {
   constructor(private readonly chunkSize: number, sizeX: number, sizeZ: number) {
     this.group.name = 'terreno';
     // começa com toda a grama cheia (255) até a simulação mandar a primeira textura
-    const tex = new THREE.DataTexture(new Uint8Array(sizeX * sizeZ).fill(255), sizeX, sizeZ, THREE.RedFormat, THREE.UnsignedByteType);
+    // R = grama, G = algas (2 bytes por bloco)
+    const tex = new THREE.DataTexture(new Uint8Array(sizeX * sizeZ * 2).fill(255), sizeX, sizeZ, THREE.RGFormat, THREE.UnsignedByteType);
     tex.magFilter = THREE.NearestFilter;
     tex.minFilter = THREE.NearestFilter;
     tex.needsUpdate = true;
