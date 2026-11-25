@@ -23,6 +23,8 @@ export interface MeshBuffers {
   normals: Int8Array;
   colors: Uint8Array;
   indices: Uint32Array;
+  /** 255 nos vértices do topo de blocos de grama (o shader pinta a grama comida) */
+  grass: Uint8Array;
   quads: number;
 }
 
@@ -104,6 +106,7 @@ function meshPadded(p: Padded, pass: MeshPass): MeshBuffers | null {
   const nor = new Grow(new Int8Array(4096), (n) => new Int8Array(n));
   const col = new Grow(new Uint8Array(4096), (n) => new Uint8Array(n));
   const idx = new Grow(new Uint32Array(4096), (n) => new Uint32Array(n));
+  const grs = new Grow(new Uint8Array(1024), (n) => new Uint8Array(n));
   let quads = 0;
 
   const x = [0, 0, 0];
@@ -178,7 +181,8 @@ function meshPadded(p: Padded, pass: MeshPass): MeshBuffers | null {
           const aoV0 = ao & 3, aoV1 = (ao >> 2) & 3, aoV2 = (ao >> 4) & 3, aoV3 = (ao >> 6) & 3;
           const base = pos.len / 3;
 
-          pos.ensure(12); nor.ensure(12); col.ensure(12); idx.ensure(6);
+          pos.ensure(12); nor.ensure(12); col.ensure(12); idx.ensure(6); grs.ensure(4);
+          const grassTop = face === 0 && (id === Block.GRASS || id === Block.FOREST_GRASS || id === Block.SWAMP_GRASS) ? 255 : 0;
           for (let k = 0; k < 4; k++) {
             // canto k: deslocamento (0|w) em u e (0|h) em v
             const ou = k === 1 || k === 2 ? w : 0;
@@ -195,6 +199,7 @@ function meshPadded(p: Padded, pass: MeshPass): MeshBuffers | null {
             col.buf[col.len + 1] = Math.round(rgb[1] * f);
             col.buf[col.len + 2] = Math.round(rgb[2] * f);
             col.len += 3;
+            grs.buf[grs.len++] = grassTop;
           }
           // troca a diagonal quando a escuridão está nela (evita "listras" de AO)
           const flip = aoV0 + aoV2 < aoV1 + aoV3;
@@ -217,7 +222,7 @@ function meshPadded(p: Padded, pass: MeshPass): MeshBuffers | null {
   }
 
   if (quads === 0) return null;
-  return { positions: pos.result(), normals: nor.result(), colors: col.result(), indices: idx.result(), quads };
+  return { positions: pos.result(), normals: nor.result(), colors: col.result(), indices: idx.result(), grass: grs.result(), quads };
 }
 
 function highestBlock(world: VoxelWorld, ox: number, oz: number, CS: number): number {
@@ -235,5 +240,5 @@ function highestBlock(world: VoxelWorld, ox: number, oz: number, CS: number): nu
 /** Lista de buffers para transferir do worker sem copiar */
 export function transferables(m: MeshBuffers | null): ArrayBuffer[] {
   if (!m) return [];
-  return [m.positions.buffer, m.normals.buffer, m.colors.buffer, m.indices.buffer] as ArrayBuffer[];
+  return [m.positions.buffer, m.normals.buffer, m.colors.buffer, m.indices.buffer, m.grass.buffer] as ArrayBuffer[];
 }

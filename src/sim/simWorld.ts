@@ -1,0 +1,113 @@
+/**
+ * Visão 2D do mundo que a simulação precisa: altura, água, bioma, temperatura.
+ * Também pré-calcula o "campo da água mais próxima" com uma busca em largura,
+ * para cada criatura saber em O(1) para que lado fica a água.
+ */
+import { Biome } from '../world/biomes';
+import { Block } from '../world/blocks';
+import type { GeneratedWorld } from '../world/worldgen';
+
+export interface WorldMaps {
+  sizeX: number;
+  sizeZ: number;
+  seaLevel: number;
+  height: Uint8Array;
+  waterTop: Uint8Array;
+  biome: Uint8Array;
+  /** 0..1 aproximadamente (pode ser negativo nos picos) */
+  temperature: Float32Array;
+  humidity: Float32Array;
+  /** bloco do topo de cada coluna */
+  topBlock: Uint8Array;
+  /** posição das árvores (troncos), para as folhas que os cervos comem */
+  trees: { x: number; z: number }[];
+}
+
+export function mapsFromWorld(g: GeneratedWorld): WorldMaps {
+  const { sizeX, sizeZ, seaLevel } = g.cfg;
+  const topBlock = new Uint8Array(sizeX * sizeZ);
+  for (let z = 0; z < sizeZ; z++)
+    for (let x = 0; x < sizeX; x++) topBlock[x + z * sizeX] = g.voxels.get(x, g.height[x + z * sizeX], z);
+  return {
+    sizeX, sizeZ, seaLevel, height: g.height, waterTop: g.waterTop, biome: g.biome,
+    temperature: g.temperature, humidity: g.humidity, topBlock,
+    trees: g.trees.filter((t) => t.kind !== 'cacto').map((t) => ({ x: t.x, z: t.z })),
+  };
+}
+
+export class SimWorld {
+  readonly sx: number;
+  readonly sz: number;
+  /** índice da célula de água mais próxima (-1 se não houver) */
+  readonly nearestWater: Int32Array;
+  /** quão boa a célula é para grama crescer (0 = nada cresce) */
+  readonly fertility: Float32Array;
+
+  constructor(readonly maps: WorldMaps) {
+    this.sx = maps.sizeX;
+    this.sz = maps.sizeZ;
+    this.nearestWater = this.computeNearestWater();
+    this.fertility = this.computeFertility();
+  }
+
+  idx(x: number, z: number): number {
+    return Math.floor(x) + Math.floor(z) * this.sx;
+  }
+
+  inside(x: number, z: number): boolean {
+    return x >= 1 && z >= 1 && x < this.sx - 1 && z < this.sz - 1;
+  }
+
+  isWater(i: number): boolean {
+    return this.maps.waterTop[i] > this.maps.height[i];
+  }
+
+  /** altura onde a criatura pisa (topo do bloco sólido) */
+  groundY(x: number, z: number): number {
+    return this.maps.height[this.idx(x, z)] + 1;
+  }
+
+  /** Temperatura do ar em °C: mapa do mundo, mais frio à noite. */
+  airTemp(i: number, night: number): number {
+    return -8 + 42 * this.maps.temperature[i] - 6 * night;
+  }
+
+  private computeNearestWater(): Int32Array {
+    const N = this.sx * this.sz;
+    const near = new Int32Array(N).fill(-1);
+    const queue = new Int32Array(N);
+    let head = 0, tail = 0;
+    for (let i = 0; i < N; i++) if (this.isWater(i)) { near[i] = i; queue[tail++] = i; }
+    while (head < tail) {
+      const i = queue[head++];
+      const x = i % this.sx, z = (i / this.sx) | 0;
+      const src = near[i];
+      if (x > 0 && near[i - 1] < 0) { near[i - 1] = src; queue[tail++] = i - 1; }
+      if (x < this.sx - 1 && near[i + 1] < 0) { near[i + 1] = src; queue[tail++] = i + 1; }
+      if (z > 0 && near[i - this.sx] < 0) { near[i - this.sx] = src; queue[tail++] = i - this.sx; }
+      if (z < this.sz - 1 && near[i + this.sx] < 0) { near[i + this.sx] = src; queue[tail++] = i + this.sx; }
+    }
+    return near;
+  }
+
+  private computeFertility(): Float32Array {
+    const N = this.sx * this.sz;
+    const f = new Float32Array(N);
+    const { topBlock, biome, humidity } = this.maps;
+    for (let i = 0; i < N; i++) {
+      if (this.isWater(i)) continue;
+      const t = topBlock[i];
+      let base = 0;
+      if (t === Block.GRASS) base = biome[i] === Biome.MOUNTAIN ? 0.55 : 0.9;
+      else if (t === Block.FOREST_GRASS) base = 1;
+      else if (t === Block.SWAMP_GRASS) base = 0.85;
+      else if (t === Block.SAND && biome[i] === Biome.DESERT) base = 0.06;
+      if (base === 0) continue;
+      // umidade e água por perto ajudam
+      const w = this.nearestWater[i];
+      const dw = w < 0 ? 99 : Math.hypot((w % this.sx) - (i % this.sx), ((w / this.sx) | 0) - ((i / this.sx) | 0));
+      f[i] = base * (0.65 + 0.35 * Math.min(1, humidity[i])) * (dw < 8 ? 1.25 : 1);
+    }
+    return f;
+  }
+}

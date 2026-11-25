@@ -24,6 +24,8 @@ export class CameraRig {
   /** altura do chão (ou da água) em x,z; vem do mapa gerado */
   groundAt: (x: number, z: number) => number = () => 0;
   onModeChange: (m: CameraMode) => void = () => {};
+  /** true quando outro código controla a câmera (ex.: "olhos do bicho") */
+  external = false;
 
   constructor(
     readonly camera: THREE.PerspectiveCamera,
@@ -43,7 +45,7 @@ export class CameraRig {
     window.addEventListener('keydown', (e) => {
       if (isTyping(e)) return;
       this.keys.add(e.code);
-      if (e.code === 'KeyF') this.setMode(this.mode === 'orbit' ? 'fly' : 'orbit');
+      if (e.code === 'KeyF' && !this.external) this.setMode(this.mode === 'orbit' ? 'fly' : 'orbit');
       if (this.mode === 'fly' && e.code === 'Space') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -114,7 +116,29 @@ export class CameraRig {
     return Math.min(400, Math.max(40, (this.camera.position.y - ground) * 1.5));
   }
 
+  /** liga/desliga o controle externo; ao desligar, volta a orbitar em volta de (x, y, z) */
+  setExternal(on: boolean, back?: THREE.Vector3): void {
+    this.external = on;
+    this.orbit.enabled = !on && this.mode === 'orbit';
+    if (!on && back) {
+      this.orbit.target.copy(back);
+      this.camera.position.set(back.x + 12, back.y + 10, back.z + 12);
+      this.orbit.update();
+    }
+  }
+
+  /** move o foco da órbita (e a câmera junto) em direção a um ponto: usado para seguir um bicho */
+  follow(x: number, y: number, z: number, dt: number): void {
+    if (this.mode !== 'orbit' || this.external) return;
+    const t = this.orbit.target;
+    const k = Math.min(1, dt * 6);
+    const dx = (x - t.x) * k, dy = (y - t.y) * k, dz = (z - t.z) * k;
+    t.x += dx; t.y += dy; t.z += dz;
+    this.camera.position.x += dx; this.camera.position.y += dy; this.camera.position.z += dz;
+  }
+
   update(dt: number): void {
+    if (this.external) return;
     const k = this.keys;
     const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
     const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);

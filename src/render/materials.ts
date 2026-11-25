@@ -16,11 +16,17 @@ float hash13(vec3 p) {
   return fract((p.x + p.y) * p.z);
 }`;
 
-export function createTerrainMaterial(): THREE.MeshLambertMaterial {
+/**
+ * @param grass textura 1 byte por bloco (0 = grama toda comida, 255 = cheia),
+ *              atualizada pela simulação. Pinta o topo dos blocos de grama.
+ */
+export function createTerrainMaterial(grass: { value: THREE.Texture }, worldSize: THREE.Vector2): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uGrass = grass;
+    shader.uniforms.uWorldSize = { value: worldSize };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWN;')
+      .replace('#include <common>', '#include <common>\nattribute float aGrass;\nvarying float vGrass;\nvarying vec3 vWPos;\nvarying vec3 vWN;')
       .replace(
         '#include <color_vertex>',
         // as cores dos vértices estão em sRGB; a iluminação precisa delas em linear
@@ -28,13 +34,19 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
       )
       .replace(
         '#include <worldpos_vertex>',
-        '#include <worldpos_vertex>\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n  vWN = normal;',
+        '#include <worldpos_vertex>\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n  vWN = normal;\n  vGrass = aGrass;',
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWN;\n${HASH_GLSL}`)
+      .replace('#include <common>', `#include <common>\nuniform sampler2D uGrass;\nuniform vec2 uWorldSize;\nvarying float vGrass;\nvarying vec3 vWPos;\nvarying vec3 vWN;\n${HASH_GLSL}`)
       .replace(
         '#include <color_fragment>',
         /* glsl */ `#include <color_fragment>
+  // grama comida: o topo do bloco vai do verde ao marrom-palha conforme a simulação
+  if (vGrass > 0.5) {
+    float amount = texture2D(uGrass, (floor(vWPos.xz) + 0.5) / uWorldSize).r;
+    vec3 dry = vec3(0.36, 0.27, 0.11); // palha (em linear)
+    diffuseColor.rgb = mix(dry, diffuseColor.rgb, 0.2 + 0.8 * amount);
+  }
   // bloco ao qual este pixel pertence (anda um pouco para dentro da face)
   vec3 cell = floor(vWPos - vWN * 0.01);
   float tone = hash13(cell);
@@ -55,8 +67,8 @@ export function createTerrainMaterial(): THREE.MeshLambertMaterial {
 export function createWaterMaterial(time: { value: number }): THREE.MeshPhongMaterial {
   const mat = new THREE.MeshPhongMaterial({
     color: 0x3c87c8,
-    specular: 0x9fc8e8,
-    shininess: 90,
+    specular: 0x7f9fbf,
+    shininess: 60,
     transparent: true,
     opacity: 0.72,
   });
@@ -85,7 +97,7 @@ export function createWaterMaterial(time: { value: number }): THREE.MeshPhongMat
     vec2 g = vec2(0.0);
     g += vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 0.9 + t * 1.3) * 0.09;
     g += vec2(-0.5, 0.85) * cos(dot(p, vec2(-0.5, 0.85)) * 1.7 + t * 1.9) * 0.05;
-    g += vec2(0.95, -0.3) * cos(dot(p, vec2(0.95, -0.3)) * 3.1 + t * 2.6) * 0.03;
+    g += vec2(0.95, -0.3) * cos(dot(p, vec2(0.95, -0.3)) * 3.1 + t * 2.6) * 0.015;
     vec3 nW = normalize(vec3(-g.x, 1.0, -g.y));
     normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);
   }`,

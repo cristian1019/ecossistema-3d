@@ -6,13 +6,29 @@ import { createTerrainMaterial, createWaterMaterial } from './materials';
 export class ChunkRenderer {
   readonly group = new THREE.Group();
   readonly time = { value: 0 };
-  private readonly terrainMat = createTerrainMaterial();
+  /** textura da grama (1 byte por bloco), atualizada pela simulação */
+  readonly grass: { value: THREE.DataTexture };
+  private readonly terrainMat: THREE.Material;
   private readonly waterMat = createWaterMaterial(this.time);
   private readonly chunks = new Map<string, { opaque?: THREE.Mesh; water?: THREE.Mesh }>();
   quads = 0;
 
-  constructor(private readonly chunkSize: number) {
+  constructor(private readonly chunkSize: number, sizeX: number, sizeZ: number) {
     this.group.name = 'terreno';
+    // começa com toda a grama cheia (255) até a simulação mandar a primeira textura
+    const tex = new THREE.DataTexture(new Uint8Array(sizeX * sizeZ).fill(255), sizeX, sizeZ, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.needsUpdate = true;
+    this.grass = { value: tex };
+    this.terrainMat = createTerrainMaterial(this.grass, new THREE.Vector2(sizeX, sizeZ));
+  }
+
+  /** troca os dados da textura da grama (vindos do worker da simulação) */
+  setGrass(bytes: Uint8Array): void {
+    const tex = this.grass.value;
+    (tex.image.data as Uint8Array).set(bytes);
+    tex.needsUpdate = true;
   }
 
   get count(): number {
@@ -43,6 +59,7 @@ export class ChunkRenderer {
     geo.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(b.normals, 3, true));
     geo.setAttribute('color', new THREE.BufferAttribute(b.colors, 3, true));
+    geo.setAttribute('aGrass', new THREE.BufferAttribute(b.grass, 1, true));
     geo.setIndex(new THREE.BufferAttribute(b.indices, 1));
     geo.computeBoundingSphere(); // usado pelo frustum culling (só desenha o que a câmera vê)
     const mesh = new THREE.Mesh(geo, mat);

@@ -63,3 +63,69 @@ input[type=range] { width: 100%; accent-color: var(--acc); }
   .panel { width: auto; right: 16px; top: 10px; left: 10px; gap: 8px; padding: 10px 12px; }
   .help { display: none; }
 }
+
+/* ---------- Fase 2: simulação, gráfico e ficha ---------- */
+:root { --bg2: rgba(255,255,255,0.06); }
+.panel { max-height: calc(100vh - 32px - 196px); overflow-y: auto; gap: 10px; }
+.titlebar { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.titlebar .fps b { font-size: 22px; }
+.info.warn, .warn { color: #f0b35a; }
+.pops { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--mut); }
+.pops i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.pops b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.opts { display: flex; flex-direction: column; gap: 4px; }
+.chk { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.chk input { width: 16px; height: 16px; accent-color: var(--acc); margin: 0; }
+details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--mut); text-transform: uppercase; letter-spacing: .04em; }
+.event:empty { display: none; }
+.event { color: #f0d080; }
+
+.chartPanel {
+  position: absolute; left: 16px; bottom: 16px; width: 300px; max-width: calc(100vw - 32px);
+  background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 6px;
+}
+.chartHead { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-bottom: 4px; }
+.chartPanel .uplot { font-family: Inter, sans-serif; color: var(--mut); }
+.chartPanel .u-legend { font-size: 11px; text-align: left; }
+.chartPanel .u-legend .u-series { padding: 0 6px 0 0; }
+.chartPanel .u-legend th { font-weight: 500; }
+.chartPanel .u-legend .u-value { display: none; }
+
+.card {
+  position: absolute; top: 16px; right: 16px; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);
+  overflow-y: auto; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.card[hidden] { display: none; }
+.cardHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.card h2 { font: 700 18px/1.15 Sora, Inter, sans-serif; margin: 0; }
+.card .sub { color: var(--mut); font-size: 12px; margin-top: 2px; }
+.muted { color: var(--mut); font-weight: 500; }
+.sex { font-size: 15px; }
+button.x { width: 32px; height: 32px; padding: 0; font-size: 20px; line-height: 1; flex: none; }
+button[aria-pressed=true] { background: var(--acc); color: var(--acc-ink); border-color: var(--acc); }
+.status { font-size: 13px; }
+.bars { display: grid; gap: 5px; }
+.bar2 { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 8px; font-size: 12px; color: var(--mut); }
+.bar2 i { display: block; height: 8px; background: rgba(255,255,255,.1); border-radius: 5px; overflow: hidden; }
+.bar2 i b { display: block; height: 100%; border-radius: 5px; }
+.bar2 em { font-style: normal; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.brain { display: block; width: 100%; color: var(--ink); }
+.outs { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--mut); }
+.outs b { color: var(--ink); }
+.genes { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 12px; color: var(--mut); }
+.genes b { color: var(--ink); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.genes .swatch { width: 12px; height: 12px; }
+.chip { height: 24px; padding: 0 7px; font-size: 12px; border-radius: 7px; margin: 2px 2px 0 0; }
+
+@media (max-width: 900px) {
+  .chartPanel { display: none; }
+  .panel { max-height: calc(100vh - 32px); }
+  .card { top: auto; bottom: 10px; right: 10px; left: 10px; width: auto; max-height: 55vh; }
+}
+/* a barra de ajuda fica entre o gráfico (esquerda) e a borda direita */
+.help { left: 332px; right: 16px; transform: none; margin: 0 auto; width: fit-content; max-width: calc(100vw - 348px); }
+@media (max-width: 1100px) { .help { display: none; } }
+/* elementos que não podem bloquear o mouse sobre o mapa (precisam vencer o "#hud > *") */
+#hud > .loading.hide, #hud > .crosshair { pointer-events: none; }

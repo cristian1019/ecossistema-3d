@@ -106,6 +106,8 @@ export class DayNight {
   private readonly shadowSunDir = new THREE.Vector3();
   private shadowDirty = true;
   private framesSinceShadow = 99;
+  /** mínimo de quadros entre atualizações da sombra (maior nas velocidades altas) */
+  shadowInterval = 3;
 
   constructor(scene: THREE.Scene, private readonly renderer: THREE.WebGLRenderer) {
     renderer.shadowMap.autoUpdate = false;
@@ -207,7 +209,7 @@ export class DayNight {
     const moved = fx !== this.shadowFocus.x || fz !== this.shadowFocus.y;
     const resized = size !== this.shadowSize;
     const sunMoved = this.sunDir.dot(this.shadowSunDir) < 0.99998; // ~0,35°
-    const due = this.framesSinceShadow >= 3;
+    const due = this.framesSinceShadow >= this.shadowInterval;
     if (!((moved || resized || sunMoved || this.shadowDirty) && due)) return;
 
     if (resized) {
