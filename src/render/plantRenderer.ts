@@ -3,7 +3,7 @@
  * A grama não é desenhada aqui: ela pinta o próprio chão pelo shader do terreno.
  */
 import * as THREE from 'three';
-import { BUSH_STRIDE } from '../workers/simProtocol';
+import { BUSH_STRIDE, CARCASS_STRIDE } from '../workers/simProtocol';
 
 const MAX = 4096;
 /** posições das (até 4) frutas em volta da copa */
@@ -16,6 +16,8 @@ export class PlantRenderer {
   private readonly body: THREE.InstancedMesh;
   private readonly top: THREE.InstancedMesh;
   private readonly fruit: THREE.InstancedMesh;
+  /** carcaças: um bloco vermelho-escuro achatado que encolhe conforme é comido */
+  private readonly carcass: THREE.InstancedMesh;
   private readonly m = new THREE.Matrix4();
   private readonly c = new THREE.Color();
 
@@ -25,7 +27,8 @@ export class PlantRenderer {
     this.body = new THREE.InstancedMesh(box, mat, MAX);
     this.top = new THREE.InstancedMesh(box, mat, MAX);
     this.fruit = new THREE.InstancedMesh(box, new THREE.MeshLambertMaterial({ color: 0xd8342c, emissive: 0x3a0606 }), MAX * 4);
-    for (const im of [this.body, this.top, this.fruit]) {
+    this.carcass = new THREE.InstancedMesh(box, new THREE.MeshLambertMaterial({ color: 0x6e1f1a }), 512);
+    for (const im of [this.body, this.top, this.fruit, this.carcass]) {
       im.count = 0;
       im.frustumCulled = false;
       im.receiveShadow = true;
@@ -66,6 +69,19 @@ export class PlantRenderer {
       im.instanceMatrix.needsUpdate = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
     }
+  }
+
+  setCarcasses(data: Float32Array): void {
+    const n = Math.min(512, data.length / CARCASS_STRIDE);
+    for (let k = 0; k < n; k++) {
+      const o = k * CARCASS_STRIDE;
+      const big = data[o + 4] === 1 ? 1.4 : 0.7; // cervo é maior
+      const s = big * (0.4 + 0.6 * data[o + 3]);
+      this.m.makeScale(s, 0.25 * s, 0.6 * s).setPosition(data[o], data[o + 1] + 0.12 * s, data[o + 2]);
+      this.carcass.setMatrixAt(k, this.m);
+    }
+    this.carcass.count = n;
+    this.carcass.instanceMatrix.needsUpdate = true;
   }
 
   get count(): number {

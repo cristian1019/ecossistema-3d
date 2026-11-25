@@ -4,7 +4,7 @@
  */
 import { DAY_LENGTH } from '../sim/clock';
 import { GENE_DEFS, GENE_KEYS } from '../sim/genome';
-import { OUTPUT_LABELS, SPECIES } from '../sim/species';
+import { SPECIES, inputLabels, outputLabels } from '../sim/species';
 import type { CreatureDetail } from '../workers/simProtocol';
 import { drawBrain } from './brainView';
 
@@ -116,11 +116,13 @@ export class CreaturePanel {
       bar('Fome', 1 - d.energy / d.maxEnergy, '#f0a050') +
       bar('Sede', 1 - d.hydration, '#58a6e8') +
       bar('Cansaço', d.fatigue, '#b48ae0') +
-      bar('Frio', Math.min(1, d.coldStress), '#7fd3e8');
+      bar('Frio', Math.min(1, d.coldStress), '#7fd3e8') +
+      bar('Camuflagem', d.camo, '#8fae6a');
 
-    drawBrain(this.el.cBrain as unknown as SVGSVGElement, d.w1, d.w2, d.input, d.hidden, d.output);
+    drawBrain(this.el.cBrain as unknown as SVGSVGElement, d.w1, d.w2, d.input, d.hidden, d.output,
+      inputLabels(d.species as never), outputLabels(d.species as never));
     const o = d.output;
-    this.el.cOuts.innerHTML = OUTPUT_LABELS.map((l, k) => {
+    this.el.cOuts.innerHTML = outputLabels(d.species as never).map((l, k) => {
       let txt: string;
       if (k === 0) txt = Math.abs(o[0]) < 0.1 ? 'reto' : `${o[0] > 0 ? 'direita' : 'esquerda'} ${Math.round(Math.abs(o[0]) * 100)}%`;
       else if (k === 1) txt = `${Math.round(((o[1] + 1) / 2) * 100)}%`;

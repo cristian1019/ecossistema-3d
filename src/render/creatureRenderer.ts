@@ -57,10 +57,45 @@ const DEER: PartDef[] = [
   ...pair({ size: [0.06, 0.16, 0.06], pos: [0.88, 2.32, 0.17], color: 0xd8c8a8, head: true, kind: 'male' }),
 ];
 
+const WOLF: PartDef[] = [
+  { size: [1.1, 0.5, 0.46], pos: [0, 0.78, 0], color: 'body', far: true },
+  { size: [0.42, 0.38, 0.36], pos: [0.68, 0.98, 0], color: 'body', head: true, far: true },
+  { size: [0.26, 0.18, 0.2], pos: [0.95, 0.9, 0], color: 'light', head: true }, // focinho
+  { size: [0.06, 0.06, 0.18], pos: [1.08, 0.94, 0], color: 0x1b1b1d, head: true }, // nariz
+  ...pair({ size: [0.05, 0.06, 0.06], pos: [0.88, 1.04, 0.11], color: 0xe6c04a, head: true }), // olhos amarelos
+  ...pair({ size: [0.08, 0.2, 0.11], pos: [0.6, 1.24, 0.11], color: 'dark', head: true, kind: 'ear' }),
+  { size: [0.9, 0.1, 0.38], pos: [0, 0.54, 0], color: 'light' }, // barriga
+  { size: [0.5, 0.15, 0.15], pos: [-0.76, 0.82, 0], color: 'dark' }, // rabo
+  ...pair({ size: [0.13, 0.55, 0.13], pos: [0.38, 0.275, 0.15], color: 'dark', kind: 'legF' }),
+  ...pair({ size: [0.13, 0.55, 0.13], pos: [-0.38, 0.275, 0.15], color: 'dark', kind: 'legB' }),
+];
+
+const FOX: PartDef[] = [
+  { size: [0.85, 0.38, 0.34], pos: [0, 0.55, 0], color: 'body', far: true },
+  { size: [0.32, 0.3, 0.3], pos: [0.54, 0.72, 0], color: 'body', head: true, far: true },
+  { size: [0.24, 0.13, 0.15], pos: [0.76, 0.66, 0], color: 'light', head: true }, // focinho claro
+  { size: [0.05, 0.05, 0.08], pos: [0.88, 0.69, 0], color: 0x161210, head: true },
+  ...pair({ size: [0.05, 0.05, 0.05], pos: [0.7, 0.78, 0.09], color: 0x161210, head: true }),
+  ...pair({ size: [0.07, 0.2, 0.1], pos: [0.49, 0.95, 0.09], color: 0x2a1c14, head: true, kind: 'ear' }),
+  { size: [0.14, 0.26, 0.26], pos: [0.42, 0.5, 0], color: 0xf2ece2 }, // peito branco
+  { size: [0.55, 0.2, 0.2], pos: [-0.66, 0.6, 0], color: 'body' }, // rabo felpudo
+  { size: [0.16, 0.18, 0.18], pos: [-0.98, 0.6, 0], color: 0xf2ece2 }, // ponta branca
+  ...pair({ size: [0.1, 0.36, 0.1], pos: [0.28, 0.18, 0.11], color: 0x2a1c14, kind: 'legF' }),
+  ...pair({ size: [0.1, 0.36, 0.1], pos: [-0.28, 0.18, 0.11], color: 0x2a1c14, kind: 'legB' }),
+];
+
+/** altura da cabeça (para a câmera "olhos do bicho") e do marcador, por espécie */
+export const HEAD_HEIGHT = [0.75, 1.85, 1.05, 0.78];
+const MARKER_TOP = [1.3, 2.6, 1.5, 1.2];
+/** quanto a cabeça desce ao comer/beber */
+const HEAD_DROP = [0.22, 0.75, 0.45, 0.3];
+
 /** modelo + escala base de cada espécie (índice = Species) */
 const SPECIES_MODELS: { parts: PartDef[]; scale: number; shadow: number }[] = [
   { parts: RABBIT, scale: 0.6, shadow: 0.7 },
   { parts: DEER, scale: 1.0, shadow: 1.5 },
+  { parts: WOLF, scale: 0.95, shadow: 1.3 },
+  { parts: FOX, scale: 0.75, shadow: 0.9 },
 ];
 
 const MAX = 2000;
@@ -222,7 +257,8 @@ export class CreatureRenderer {
       const flags = buf[o + SNAP.FLAGS];
       const speed = buf[o + SNAP.SPEED];
       const sleeping = (flags & FLAG.SLEEP) !== 0;
-      const headDown = (flags & (FLAG.EAT | FLAG.DRINK)) !== 0;
+      const headDown = (flags & (FLAG.EAT | FLAG.DRINK | FLAG.NURSE)) !== 0;
+      const lunge = (flags & FLAG.ATTACK) !== 0;
       const male = (flags & FLAG.MALE) !== 0;
       // passada: fase avança com a velocidade; cada bicho tem sua própria fase (id)
       const anim = animate && !far;
@@ -248,7 +284,8 @@ export class CreatureRenderer {
         const mesh = sp.meshes[pi];
         const n = sp.partCount[pi]++;
         let px = part.pos[0], py = part.pos[1];
-        if (part.head && headDown) { px += 0.12; py -= species === 0 ? 0.22 : 0.75; }
+        if (part.head && headDown) { px += 0.12; py -= HEAD_DROP[species]; }
+        if (part.head && lunge) { px += 0.25; py -= 0.1; } // bote: a cabeça avança
         if (part.head && sleeping) { py -= species === 0 ? 0.1 : 0.45; }
         const w = part.size[0], h = part.size[1], d = part.size[2];
         if (part.kind === 'legF' || part.kind === 'legB') {
@@ -300,7 +337,7 @@ export class CreatureRenderer {
     this.marker.visible = this.trackedVisible && hideId === null;
     if (this.marker.visible) {
       const t = this.tracked;
-      const top = t.species === 0 ? 1.3 : 2.6;
+      const top = MARKER_TOP[t.species] ?? 2;
       this.marker.position.set(t.x, t.y + t.scale * top + 0.5 + Math.sin(time * 3) * 0.12, t.z);
       this.marker.rotation.y = time * 2;
     }

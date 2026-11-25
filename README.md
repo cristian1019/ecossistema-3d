@@ -6,8 +6,10 @@ ninguém programa o comportamento deles; os cérebros e corpos que funcionam mel
 
 A arte é 100% original: blocos com cores planas, variação de tom e contorno feitos no shader, sem texturas de outros jogos.
 
-> **Status:** Fase 2 de 6 concluída: mundo 3D, plantas e herbívoros (coelhos e cervos) evoluindo.
-> Predadores chegam na Fase 3.
+> **Status:** Fase 3 de 6 concluída: mundo 3D, plantas, herbívoros (coelhos e cervos) e predadores
+> (lobos e raposas) com caça, fuga, camuflagem e ciclos predador-presa.
+
+![Lobo selecionado com a ficha mostrando o cérebro de predador; cervo e gráfico de população](docs/screenshot-fase3.jpg)
 
 ![Coelhos, arbustos, gráfico de população e a ficha com o cérebro ao vivo](docs/screenshot-fase2.jpg)
 
@@ -96,18 +98,21 @@ A simulação anda em passos de 0,2 s de "tempo de simulação"; um dia dura 240
 A cada passo, cada criatura:
 
 1. **Sente** o mundo e preenche as 23 entradas do cérebro.
-2. **Pensa**: as entradas passam pela rede neural (23 → 10 → 6).
+2. **Pensa**: as entradas passam pela rede neural (23 → 12 → 6).
 3. **Age** conforme as 6 saídas: virar, acelerar, comer, beber, dormir, acasalar.
 4. **Gasta energia**: metabolismo, movimento (∝ massa × velocidade²), cérebro e olhos.
-5. Pode **acasalar**, **parir** ou **morrer** (fome, sede, frio, velhice).
+5. Pode **acasalar**, **parir**, **caçar** ou **morrer** (fome, sede, frio, velhice, predação).
+
+Todas as espécies usam o mesmo cérebro. Para um predador, a entrada "comida" é a **presa** visível mais próxima
+(ou uma carcaça) e a saída "comer" é **atacar**.
 
 ### O cérebro
 
 ```
- 23 entradas (sentidos)               10 ocultos (tanh)      6 saídas (decisões)
+ 23 entradas (sentidos)               12 ocultos (tanh)      6 saídas (decisões)
  comida/água/parceiro/grupo:            ●                     virar
    [lado, frente, perto]                ●                     acelerar
- predador (Fase 3)                      ●                     comer
+ predador mais próximo                  ●                     comer (ou atacar)
  fome, sede, cansaço, frio, noite  ──▶  ●   ──────────────▶   beber
  subida à frente, bloqueado             ●                     dormir
  constante (viés)                       ●                     acasalar
@@ -115,7 +120,7 @@ A cada passo, cada criatura:
 
 - As direções são **relativas à cabeça do bicho**: seno do ângulo até o alvo (está à esquerda ou à direita?)
   e cosseno (está na frente ou atrás?). Por isso uma única ligação "comida à direita → vire à direita" já funciona.
-- Os **296 pesos fazem parte do DNA**. Não existe treino por gradiente nem "nota": só seleção natural.
+- Os **354 pesos fazem parte do DNA**. Não existe treino por gradiente nem "nota": só seleção natural.
 - A ficha da criatura desenha a rede ao vivo: linha verde reforça, laranja inibe, e as bolinhas acendem conforme ela pensa.
 
 ### Genes de corpo e seus custos (trade-offs)
@@ -129,7 +134,7 @@ A cada passo, cada criatura:
 | Resistência ao frio | aguenta noites e montanhas frias | gasto extra e sofre no calor |
 | Ninhada | mais filhotes por gestação | cada filhote nasce com menos energia |
 | Idade máxima | vive mais | amadurece mais tarde |
-| Cor (RGB) | camuflagem (Fase 3) | — |
+| Cor (RGB) | camuflagem: quanto mais parecida com o chão, mais de perto precisa estar para ser notado | — (mas o chão muda de bioma para bioma) |
 
 ### Reprodução sexuada
 
@@ -151,11 +156,35 @@ A cada passo, cada criatura:
 - **Folhas de árvore** (ramoneio): só o cervo alcança. Esse **nicho separado** evita que os coelhos,
   que pastam rente, deixem os cervos sem comida.
 
+### Predadores, caça e fuga
+
+| Espécie | Caça | Detalhes |
+|---|---|---|
+| Lobo | cervos e coelhos | vive em alcateia; cervo é grande e se defende, então caçar em grupo compensa |
+| Raposa | coelhos | **onívora**: come frutas quando está com fome e não acha presa |
+
+- **Ataque**: com a presa ao alcance e a saída "atacar" ligada, cada tentativa (uma a cada 1,2 s, custa 1% da energia) acerta com
+  chance `0,4 × √(massa do predador / massa da presa)` **+ 15% por companheiro de alcateia atacando junto** (até 3)
+  **+ 40% se a presa está dormindo**. Assim a caça em grupo pode evoluir: o cérebro tem a entrada "grupo" e a evolução
+  decide se vale a pena andar junto.
+- **Carcaça**: a presa morta vira carne (400 de energia por unidade de massa) que qualquer lobo/raposa pode comer e que
+  apodrece em 150 s. Um cervo alimenta a alcateia inteira.
+- **Fuga**: as presas sentem o predador visível mais próximo (lado, frente, distância). O instinto inicial tem
+  "predador de um lado → vire para o outro" e "predador perto → corra e acorde".
+- **Camuflagem**: cada bloco do chão tem uma cor. A camuflagem de um bicho é 1 quando a cor dele (genes R, G, B) é igual à
+  do chão onde está e 0 quando a diferença passa de 0,5. Ela reduz em até **60%** a distância em que ele é notado.
+  **Andar rápido denuncia**: em movimento, a camuflagem vale só 40%. Vale para os dois lados: predador camuflado também
+  chega mais perto sem ser visto.
+- **Amamentação**: filhotes de qualquer espécie, na primeira metade da infância e a menos de 8 blocos da mãe, recebem
+  energia dela (até 0,5% da reserva da mãe por segundo); filhote pequeno segue a mãe. Sem isso, filhotes de predador,
+  que ainda não sabem caçar, morriam todos de fome.
+
 ### Instinto inicial e repovoamento
 
 - Com cérebros 100% aleatórios, quase todos os bichos giram em círculos e morrem, e o cervo, que se reproduz devagar,
   não tem tempo de evoluir. Por isso a **primeira geração** nasce de um "ancestral primitivo": algumas ligações simples
-  escritas à mão ("fome + comida perto → comer", "cansado + noite → dormir"...) mais ruído aleatório.
+  escritas à mão ("fome + comida perto → comer", "cansado + noite → dormir", "predador perto → fugir",
+  e para predadores "presa perto e fome → perseguir") mais ruído aleatório.
   Depois disso, tudo é seleção natural. Dá para desligar no painel e comparar.
 - **Repovoamento** (pode desligar): se uma espécie cai abaixo de 6 indivíduos, dois bandos novos são soltos a partir
   dos **melhores genomas já vistos** daquela espécie (mais filhos deixados).
@@ -176,10 +205,21 @@ Ajustados rodando a simulação sem tela por 30 a 60 dias simulados e olhando po
 | Metabolismo basal | ∝ massa^0,75 (lei de Kleiber) | bicho grande gasta menos por quilo |
 | Custo fixo do cérebro/olhos | 0,1 + 0,004 × visão | não diminui se o corpo encolher |
 | Seleção sexual | fêmea prefere macho maior | contrapeso real ao encolhimento |
+| Metabolismo basal dos predadores | 30% do dos herbívoros | passam muito tempo parados entre refeições; com 100% morriam de fome entre caçadas |
+| Carne | 400 por unidade de massa da presa | um coelho rende ~1 dia de raposa; com 60% da reserva da presa, lobos não se sustentavam |
+| Movimento | 0,25 × massa × (v/5)² | perseguir no máximo custava ~9/s para um lobo grande |
+| Parto dos predadores | 30% da energia da mãe, ninhada 3, gestação 90 s (lobo) / 70 s (raposa) | com ninhada 4 e gestação curta, os lobos explodiam e colapsavam |
+| Amamentação | 0,5%/s por filhote, até 35%; só com a mãe acima de 30% | com 2%/s até 70%, a ninhada matava a mãe de fome |
+| Frutas para a raposa | só abaixo de 50% de energia, eficiência 0,5 | comendo à vontade, as raposas ficavam numerosas mesmo sem coelhos e os extinguiam |
 
-Resultado numa rodada de 30 dias (seed `ecossistema`): depois do pico e da queda dos primeiros dias, coelhos
-oscilam entre ~180 e ~350 e cervos sobem devagar até ~600, convivendo, cada um no seu nicho. Sem predadores, ainda não
-há um teto natural firme para os cervos: isso fica para a Fase 3.
+**Ciclos predador-presa (Fase 3).** Com o repovoamento ligado (o padrão), aparecem os ciclos de Lotka-Volterra com o
+atraso clássico. Exemplo de 40 dias: os cervos sobem de 106 para 486, os lobos sobem atrás (9 → 235), os cervos
+despencam para 127 e os lobos caem em seguida. O repovoamento entrou 4 a 6 vezes em 40 dias (~1 por semana).
+
+**Limitação honesta:** com o repovoamento **desligado**, as oscilações são grandes demais para um mundo finito e, na maioria
+das sementes testadas, alguma espécie some entre os dias 10 e 25 (às vezes os lobos comem todos os cervos e depois morrem de
+fome). É a mesma instabilidade dos experimentos clássicos de Gause com protozoários. Amortecer isso sem rede de segurança
+(refúgios para presas, predadores que trocam de presa, territórios) é um bom próximo passo.
 
 ### Fenômenos que apareceram sozinhos (e como cada um foi resolvido)
 
@@ -196,6 +236,12 @@ apareceram sem ninguém programar:
 - **Efeito Allee**: com poucos cervos espalhados pela floresta, quase nenhuma fêmea pronta tinha um macho pronto a menos
   de 40 blocos. A população caía mesmo com comida sobrando. O chamado de acasalamento e a corte resolveram.
 - **Explosão por excesso de comida**: com 4.500 arbustos dando frutas, os coelhos chegavam ao limite de 2.000.
+- **Explosão e colapso dos predadores**: com reprodução rápida, os lobos foram de 24 para 89 em 3 dias, acabaram com os
+  cervos e morreram de fome. Reprodução mais lenta reduziu a amplitude.
+- **Hiperpredação**: quando a raposa podia viver só de frutas, ela continuava numerosa mesmo com poucos coelhos e
+  extinguia os coelhos (um predador generalista que não depende da presa pode eliminá-la).
+- **Bugs que os números revelaram**: um neurônio de fuga com viés deixava todos os bichos lentos e sonolentos mesmo sem
+  predador; a fêmea "mirava" parceiros que não estavam prontos; e a amamentação drenava a mãe até a morte.
 
 ## Renderização e desempenho
 
@@ -242,13 +288,17 @@ npm test
   - **reprodução**: gestação, filhotes com geração certa e pais registrados; macho + macho, espécies diferentes,
     jovens e famintos não reproduzem;
   - **determinismo**: mesma seed, mesmo resultado.
+- `predation.test.ts`: lobo mata coelho dormindo (vira carcaça), predador come a carcaça, a carcaça apodrece,
+  predador não come planta, raposa não caça cervo, **camuflagem** (coelho da cor da grama não é notado a 14 blocos,
+  coelho branco é), coelho com instinto **foge**, filhote **mama** e mãe fraca não amamenta.
 
 ## Roteiro
 
 - [x] **Fase 1**: mundo 3D com biomas, rios, lagos, árvores, dia/noite, neblina, sombras, câmera, FPS
 - [x] **Fase 2**: simulação no Web Worker, plantas, coelhos e cervos com cérebro, genes, necessidades e
       reprodução sexuada; gráfico de população; ficha com a rede neural ao vivo
-- [ ] **Fase 3**: predadores, caça/fuga, camuflagem, ciclos predador-presa, gráficos de genes
+- [x] **Fase 3**: lobos e raposas, caça em grupo, carcaças, fuga, camuflagem, amamentação, ciclos predador-presa,
+      gráfico da evolução dos genes por espécie
 - [ ] **Fase 4**: peixes, algas e pássaros
 - [ ] **Fase 5**: humanos, tribos, conhecimento e construções
 - [ ] **Fase 6**: estações, clima, modo deus, salvar/carregar, mini-mapa, polimento

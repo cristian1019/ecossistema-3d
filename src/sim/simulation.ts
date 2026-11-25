@@ -7,7 +7,10 @@
  *   2. PENSA: as entradas passam pela rede neural
  *   3. AGE conforme as saídas: vira, anda, come, bebe, dorme, quer acasalar
  *   4. GASTA energia: custo ∝ massa (tamanho³) e ∝ velocidade², mais o cérebro
- *   5. pode ACASALAR, PARIR ou MORRER (fome, sede, frio, velhice)
+ *   5. pode ACASALAR, PARIR ou MORRER (fome, sede, frio, velhice, predação)
+ *
+ * Predadores (lobo, raposa) usam o mesmo cérebro: para eles "comida" é a presa
+ * mais próxima que conseguem ENXERGAR (a camuflagem atrapalha) e "comer" é atacar.
  */
 import { createRng, type Rng } from '../core/rng';
 import { clamp } from '../core/math';
@@ -15,7 +18,7 @@ import { daylightAt } from './clock';
 import { forward, randomBrain } from './neural';
 import { instinctBrain } from './instincts';
 import { makeChild, mutateGenes, mutatedCopy, type Genes, type Genome } from './genome';
-import { HERBIVORE_BRAIN, SPECIES, SPECIES_COUNT, type Species, type SpeciesConfig } from './species';
+import { BRAIN_SHAPE, SPECIES, SPECIES_COUNT, type Species, type SpeciesConfig } from './species';
 import { BROWSE_ENERGY, FRUIT_ENERGY, GRASS_ENERGY, Plants, type Bush } from './plants';
 import { SimWorld, type WorldMaps } from './simWorld';
 
@@ -26,6 +29,34 @@ const TURN_RATE = 3; // rad/s com a saída "virar" no máximo
 /** o chamado de acasalamento é ouvido a MATE_CALL × visão */
 const MATE_CALL = 3;
 const STATS_EVERY = 10; // s de simulação entre amostras dos gráficos
+
+/** HUNTS[a][b] = a espécie a caça a espécie b */
+const HUNTS: boolean[][] = SPECIES.map((p) => SPECIES.map((q) => p.prey.includes(q.id)));
+
+// ---- números da caça (ver README: "Números do equilíbrio") ----
+/** chance base de um ataque dar certo (por tentativa) */
+const ATTACK_BASE = 0.4;
+/** bônus por companheiro de alcateia atacando junto (até 3) */
+const PACK_BONUS = 0.15;
+/** tempo entre tentativas de ataque (s) */
+const ATTACK_COOLDOWN = 1.2;
+/** energia de carne na carcaça por unidade de massa da presa (carne rende mais que planta por quilo) */
+const MEAT_PER_MASS = 400;
+/** a carcaça apodrece em CARCASS_LIFE segundos */
+const CARCASS_LIFE = 150;
+/** quanto a camuflagem reduz a distância em que alguém é notado (60% no máximo) */
+const CAMO_STRENGTH = 0.6;
+
+export interface Carcass {
+  id: number;
+  x: number;
+  z: number;
+  y: number;
+  species: Species;
+  /** energia de carne que ainda sobra */
+  meat: number;
+  max: number;
+}
 
 export type DeathCause = 'fome' | 'sede' | 'frio' | 'velhice' | 'predação';
 
@@ -68,6 +99,13 @@ export interface Creature {
   wantsMate: boolean;
   /** indo encontrar um parceiro */
   courting: boolean;
+  /** tentou atacar neste passo (para a animação) */
+  attacking: boolean;
+  /** mamando (filhote recebendo energia da mãe) */
+  nursing: boolean;
+  attackCd: number;
+  /** camuflagem atual (cor do corpo contra o chão onde está), 0..1 */
+  camo: number;
   pregnant: Pregnancy | null;
   cooldown: number;
   alive: boolean;
@@ -86,6 +124,11 @@ export interface Targets {
   friend: Creature | null;
   /** arbusto com fruta mais próximo achado na busca (comer usa ele direto) */
   bush: Bush | null;
+  /** (predadores) presa visível mais próxima e carcaça mais próxima */
+  prey: Creature | null;
+  carcass: Carcass | null;
+  /** (presas) predador visível mais próximo */
+  pred: Creature | null;
 }
 
 export interface StatsSample {
@@ -98,8 +141,14 @@ export interface StatsSample {
   /** mortes por causa, por espécie, desde a amostra anterior */
   deaths: Record<DeathCause, number>[];
   /** média de alguns genes por espécie (para os gráficos de evolução) */
-  genes: { speed: number; size: number; vision: number; fur: number; metabolism: number; litter: number }[];
+  genes: GeneAverages[];
   maxGen: number[];
+}
+
+export interface GeneAverages {
+  speed: number; size: number; vision: number; fur: number; metabolism: number; litter: number;
+  /** camuflagem média no lugar onde cada um está agora */
+  camo: number;
 }
 
 export interface HallEntry {
@@ -149,6 +198,12 @@ export class Simulation {
   private statsTimer = 0;
   /** eventos para a linha do tempo (ex.: "repovoamento dos cervos") */
   readonly events: { t: number; text: string }[] = [];
+  carcasses: Carcass[] = [];
+  private nextCarcassId = 1;
+  /** espécies extintas no momento (para avisar só uma vez) */
+  private extinct = new Array(SPECIES_COUNT).fill(false);
+  /** total de caçadas bem-sucedidas por espécie de predador */
+  readonly kills = new Array(SPECIES_COUNT).fill(0);
 
   // grade espacial das criaturas (células de 8×8 blocos), lista ligada em arrays
   private readonly GRID = 8;
@@ -184,7 +239,7 @@ export class Simulation {
   randomGenome(species: Species): Genome {
     const genes: Genes = { ...SPECIES[species].genes };
     mutateGenes(genes, this.rng, 2);
-    const brain = this.opts.instincts ? instinctBrain(HERBIVORE_BRAIN, this.rng) : randomBrain(HERBIVORE_BRAIN, this.rng);
+    const brain = this.opts.instincts ? instinctBrain(BRAIN_SHAPE, this.rng, SPECIES[species].diet) : randomBrain(BRAIN_SHAPE, this.rng);
     return { genes, brain };
   }
 
@@ -204,12 +259,16 @@ export class Simulation {
       // amadurecer: 15% da vida; metabolismo alto acelera
       maturity: (0.15 * g.maxAge) / Math.sqrt(g.metabolism),
       generation: 1, mother: 0, father: 0, children: 0, childIds: [],
-      sleeping: false, eating: false, drinking: false, wantsMate: false, courting: false, pregnant: null, cooldown: 0,
+      sleeping: false, eating: false, drinking: false, wantsMate: false, courting: false, attacking: false, nursing: false, attackCd: 0, camo: 0,
+      pregnant: null, cooldown: 0,
       alive: true, cause: null,
-      input: new Float32Array(HERBIVORE_BRAIN.inputs),
-      hidden: new Float32Array(HERBIVORE_BRAIN.hidden),
-      output: new Float32Array(HERBIVORE_BRAIN.outputs),
-      targets: { foodOk: false, foodX: 0, foodZ: 0, waterOk: false, waterX: 0, waterZ: 0, mate: null, friend: null, bush: null },
+      input: new Float32Array(BRAIN_SHAPE.inputs),
+      hidden: new Float32Array(BRAIN_SHAPE.hidden),
+      output: new Float32Array(BRAIN_SHAPE.outputs),
+      targets: {
+        foodOk: false, foodX: 0, foodZ: 0, waterOk: false, waterX: 0, waterZ: 0,
+        mate: null, friend: null, bush: null, prey: null, carcass: null, pred: null,
+      },
       ...opts,
     };
     this.creatures.push(c);
@@ -276,6 +335,12 @@ export class Simulation {
       this.creatures = this.creatures.filter((c) => c.alive);
     }
 
+    // carcaças apodrecem
+    if (this.carcasses.length) {
+      for (const k of this.carcasses) k.meat -= (k.max / CARCASS_LIFE) * dt;
+      this.carcasses = this.carcasses.filter((k) => k.meat > 0);
+    }
+
     if ((this.grassTimer += dt) >= 5) {
       this.plants.updateGrass(this.grassTimer, daylight);
       this.grassTimer = 0;
@@ -291,6 +356,7 @@ export class Simulation {
     if ((this.statsTimer += dt) >= STATS_EVERY) {
       this.statsTimer = 0;
       this.recordStats();
+      this.checkExtinctions();
     }
   }
 
@@ -311,6 +377,9 @@ export class Simulation {
     c.coldStress = clamp((comfortMin - T) / 10, 0, 2);
     const heat = clamp((T - comfortMax) / 10, 0, 2);
 
+    // camuflagem: cor do corpo contra a cor do chão onde está agora
+    c.camo = w.camo(g.r, g.g, g.b, i);
+
     // ---- 1 e 2: sentir e pensar ----
     // busca cara a cada 3 passos (escalonada pelo id); filhote recém-nascido busca já
     if ((this.tick + c.id) % 3 === 0 || c.age <= DT) this.scan(c, i, night);
@@ -321,13 +390,17 @@ export class Simulation {
     // ---- 3: agir ----
     // dormir é um estado: entra se a rede quiser e estiver cansado (ou se esgotar)
     if (c.sleeping) {
-      if ((out[4] < -0.3 && c.fatigue < 0.6) || c.fatigue <= 0) c.sleeping = false;
+      // acorda se descansou, ou se a rede mandar (com predador perto, acorda mesmo cansado)
+      const danger = c.input[8] > 0.3;
+      if ((out[4] < -0.3 && (c.fatigue < 0.6 || danger)) || c.fatigue <= 0) c.sleeping = false;
     } else if ((out[4] > 0.3 && c.fatigue > 0.25) || c.fatigue >= 1) {
       c.sleeping = true;
     }
     c.wantsMate = out[5] > 0;
     c.eating = false;
     c.drinking = false;
+    c.attacking = false;
+    if (c.attackCd > 0) c.attackCd -= dt;
     let v = 0;
     if (!c.sleeping) {
       // pernas maiores = passada maior: corpo pequeno corre um pouco menos
@@ -342,14 +415,20 @@ export class Simulation {
         const diff = Math.atan2(Math.sin(want - c.yaw), Math.cos(want - c.yaw));
         c.yaw += clamp(diff, -TURN_RATE * dt, TURN_RATE * dt);
         sp = Math.max(sp, g.speed * 0.6);
+      } else if (c.age < c.maturity * 0.5 && this.followMother(c, dt)) {
+        // filhote pequeno longe da mãe vai atrás dela (reflexo inato)
+        sp = Math.max(sp, g.speed * 0.9);
       } else {
         c.yaw += out[0] * TURN_RATE * dt;
       }
       if (c.age < c.maturity) sp *= 0.8;
       if (c.fatigue > 0.9) sp *= 0.5;
-      if (out[2] > 0) this.tryEat(c, i, dt);
+      if (out[2] > 0) {
+        if (c.cfg.diet === 'meat') this.tryHunt(c, dt);
+        else this.tryEat(c, i, dt);
+      }
       if (out[3] > 0) this.tryDrink(c, i, dt);
-      if (c.eating || c.drinking) sp *= 0.2;
+      if ((c.eating || c.drinking) && !c.attacking) sp *= 0.2;
       v = sp;
       this.move(c, i, v * dt);
     }
@@ -360,10 +439,11 @@ export class Simulation {
     // lei de Kleiber: metabolismo basal ∝ massa^0,75 (bicho grande gasta menos por quilo);
     // normalizado pela massa da espécie para manter os números de cada uma
     const kleiber = c.cfg.mass * (m / c.cfg.mass) ** 0.75;
-    let burn = 0.25 * kleiber * g.metabolism * (1 + 0.6 * g.fur * g.fur) * (1 + 1.5 * c.coldStress);
+    let burn = 0.25 * c.cfg.basal * kleiber * g.metabolism * (1 + 0.6 * g.fur * g.fur) * (1 + 1.5 * c.coldStress);
     if (c.sleeping) burn *= 0.6;
-    if (c.age < c.maturity) burn *= 0.5; // filhote: corpo menor
-    burn += 0.35 * m * (v / 4) ** 2; // movimento: ∝ massa × velocidade²
+    // filhote: corpo bem menor (recém-nascido gasta 30% de um adulto; jovem, 60%)
+    if (c.age < c.maturity) burn *= c.age < c.maturity * 0.5 ? 0.3 : 0.6;
+    burn += 0.25 * m * (v / 5) ** 2; // movimento: ∝ massa × velocidade² (correr no máximo custa caro)
     // cérebro e olhos têm custo FIXO por indivíduo (não diminuem com o corpo);
     // sem isso a evolução encolhe os bichos sem limite (nanismo)
     burn += 0.1 + 0.004 * g.vision;
@@ -373,6 +453,10 @@ export class Simulation {
     else c.fatigue += (dt / 650) * (1 + (0.5 * v) / g.speed) * (1 + 0.4 * night);
     c.fatigue = clamp(c.fatigue, 0, 1);
     if (c.cooldown > 0) c.cooldown -= dt;
+
+    // ---- amamentação: filhote pequeno perto da mãe recebe energia dela ----
+    c.nursing = false;
+    if (c.age < c.maturity * 0.5 && c.energy < c.maxEnergy * 0.35) this.nurse(c, dt);
 
     // ---- 5: reprodução ----
     if (c.pregnant) {
@@ -390,6 +474,7 @@ export class Simulation {
 
   /** valor de comida de uma célula PARA ESTA espécie (coelho não alcança folhas de árvore) */
   private foodAt(c: Creature, j: number): number {
+    if (c.cfg.diet === 'meat') return 0;
     const grass = Math.max(0, this.plants.grass[j] - c.cfg.grazeMin);
     return grass * c.cfg.grassEff + this.plants.browse[j] * c.cfg.browseEff;
   }
@@ -403,12 +488,14 @@ export class Simulation {
   private scan(c: Creature, i: number, night: number): void {
     const g = c.genome.genes;
     const w = this.world;
-    const vision = g.vision * (1 - 0.5 * night);
+    // à noite enxerga metade; dormindo, quase nada (só o que está bem perto)
+    const vision = g.vision * (1 - 0.5 * night) * (c.sleeping ? 0.3 : 1);
     const t = c.targets;
+    const carnivore = c.cfg.diet === 'meat';
 
-    // --- comida: farejada em 8 direções × 3 distâncias, ou arbusto com fruta ---
+    // --- comida (herbívoros): farejada em 8 direções × 3 distâncias, ou arbusto com fruta ---
     let best = 0, tx = 0, tz = 0, found = false;
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < (carnivore ? 0 : 8); k++) {
       for (let s = 0; s < 3; s++) {
         const dist = s === 0 ? 2 : s === 1 ? vision * 0.5 : vision;
         const px = c.x + DIRX[k] * dist, pz = c.z + DIRZ[k] * dist;
@@ -426,6 +513,16 @@ export class Simulation {
         tx = bush.bush.x + 0.5; tz = bush.bush.z + 0.5; found = true;
       }
     }
+    // --- carcaça (predadores): comida parada, ninguém precisa caçar ---
+    t.carcass = null;
+    if (carnivore) {
+      let cd = vision * vision;
+      for (const k of this.carcasses) {
+        if (!HUNTS[c.species][k.species]) continue;
+        const d = (k.x - c.x) ** 2 + (k.z - c.z) ** 2;
+        if (d < cd) { cd = d; t.carcass = k; }
+      }
+    }
     t.foodOk = found; t.foodX = tx; t.foodZ = tz;
 
     // --- água mais próxima (campo pré-calculado) ---
@@ -433,15 +530,16 @@ export class Simulation {
     t.waterOk = wi >= 0;
     if (wi >= 0) { t.waterX = (wi % w.sx) + 0.5; t.waterZ = ((wi / w.sx) | 0) + 0.5; }
 
-    // --- predador: entra na Fase 3 ---
-
-    // --- parceiro e grupo: varre a grade espacial em volta (sem closure: é o laço mais quente) ---
+    // --- parceiro, grupo, presa e predador: varre a grade espacial em volta (sem closure: é o laço mais quente) ---
     // parceiro é percebido de 2× mais longe (chamados de acasalamento, cheiro);
     // sem isso, populações ralas não se encontram e somem (efeito Allee)
     const adult = c.age >= c.maturity;
     const mateRange = adult ? vision * MATE_CALL : 0;
     let mate: Creature | null = null, md = mateRange * mateRange;
     let friend: Creature | null = null, fd = vision * vision;
+    let prey: Creature | null = null, pd = Infinity;
+    let pred: Creature | null = null, qd = Infinity;
+    const hunts = HUNTS[c.species];
     const r = Math.max(vision, mateRange);
     const G = this.GRID;
     const x0 = clamp(Math.floor((c.x - r) / G), 0, this.gx - 1), x1 = clamp(Math.floor((c.x + r) / G), 0, this.gx - 1);
@@ -450,10 +548,24 @@ export class Simulation {
       for (let gx = x0; gx <= x1; gx++) {
         for (let k = this.head[gx + gz * this.gx]; k >= 0; k = this.next[k]) {
           const o = this.creatures[k];
-          if (o === c || o.species !== c.species || !o.alive) continue;
+          if (o === c || !o.alive) continue;
           const dx = o.x - c.x, dz = o.z - c.z, d = dx * dx + dz * dz;
+          if (o.species !== c.species) {
+            // outra espécie: presa (se eu caço ela) ou predador (se ela me caça).
+            // CAMUFLAGEM: quem tem a cor parecida com o chão só é notado mais de perto;
+            // andar rápido denuncia (a camuflagem vale menos em movimento)
+            const isPrey = hunts[o.species], isPred = HUNTS[o.species][c.species];
+            if (!isPrey && !isPred) continue;
+            const hidden = o.camo * (o.v > 1.5 ? 0.4 : 1);
+            const seen = vision * (1 - CAMO_STRENGTH * hidden);
+            if (d > seen * seen) continue;
+            if (isPrey && d < pd) { pd = d; prey = o; }
+            if (isPred && d < qd) { qd = d; pred = o; }
+            continue;
+          }
           if (d < fd) { fd = d; friend = o; }
-          if (adult && o.sex !== c.sex && o.age >= o.maturity && !o.pregnant) {
+          // parceiro só conta se estiver PRONTO (senão a fêmea mira um macho que não pode acasalar)
+          if (adult && o.sex !== c.sex && this.ready(o)) {
             // seleção sexual: a fêmea "mede" o macho pela distância dividida pelo tamanho²
             // (um macho 40% maior vale tanto quanto um normal que está a metade da distância)
             const score = c.sex === 0 ? d / (o.genome.genes.size ** 4) : d;
@@ -464,6 +576,8 @@ export class Simulation {
     }
     t.mate = mate;
     t.friend = friend;
+    t.prey = prey;
+    t.pred = pred;
   }
 
   /** Preenche as entradas da rede neural a partir dos alvos guardados. Ver INPUT_LABELS. */
@@ -474,11 +588,22 @@ export class Simulation {
     const vision = c.genome.genes.vision * (1 - 0.5 * night);
     const t = c.targets;
 
-    // comida: se tem comida sob os pés, "está aqui, à frente, pertíssimo"
-    if (this.foodAt(c, i) > 0.2) { inp[1] = 1; inp[2] = 1; }
-    else if (t.foodOk) this.dirInput(c, 0, t.foodX, t.foodZ, vision);
+    if (c.cfg.diet === 'meat') {
+      // predador: a "comida" é a carcaça (se estiver perto) ou a presa visível mais próxima
+      const k = t.carcass, p = t.prey;
+      const kd = k && k.meat > 0 ? (k.x - c.x) ** 2 + (k.z - c.z) ** 2 : Infinity;
+      const pd = p && p.alive ? (p.x - c.x) ** 2 + (p.z - c.z) ** 2 : Infinity;
+      if (kd < 2.5) { inp[1] = 1; inp[2] = 1; }
+      else if (kd <= pd && k) this.dirInput(c, 0, k.x, k.z, vision);
+      else if (p && p.alive) this.dirInput(c, 0, p.x, p.z, vision);
+      else if (t.foodOk) this.dirInput(c, 0, t.foodX, t.foodZ, vision); // onívoro: frutas
+    } else if (this.foodAt(c, i) > 0.2) {
+      // comida sob os pés: "está aqui, à frente, pertíssimo"
+      inp[1] = 1; inp[2] = 1;
+    } else if (t.foodOk) this.dirInput(c, 0, t.foodX, t.foodZ, vision);
     if (t.waterOk) this.dirInput(c, 3, t.waterX, t.waterZ, vision * 1.5);
-    // predador (6, 7, 8): Fase 3
+    // predador visível mais próximo (presas fogem dele)
+    if (t.pred && t.pred.alive) this.dirInput(c, 6, t.pred.x, t.pred.z, vision);
     if (t.mate && t.mate.alive) this.dirInput(c, 9, t.mate.x, t.mate.z, vision * MATE_CALL);
     if (t.friend && t.friend.alive) this.dirInput(c, 12, t.friend.x, t.friend.z, vision);
 
@@ -511,21 +636,25 @@ export class Simulation {
     c.input[base + 2] = 1 - d / range;
   }
 
+  /** come fruta do arbusto-alvo se ele estiver ao alcance; devolve true se estava */
+  private eatFruit(c: Creature, dt: number): boolean {
+    const reach = 1.3 + c.genome.genes.size * 0.3;
+    const b = c.targets.bush;
+    if (!b || b.fruit < 1 || (b.x + 0.5 - c.x) ** 2 + (b.z + 0.5 - c.z) ** 2 > reach * reach) return false;
+    c.eating = true;
+    // ~1 fruta a cada 0,7 s
+    if (this.rng.next() < dt * 1.4) {
+      b.fruit--;
+      c.energy = Math.min(c.maxEnergy, c.energy + FRUIT_ENERGY * c.cfg.fruitEff);
+      c.hydration = Math.min(1, c.hydration + 0.06); // fruta tem água
+    }
+    return true;
+  }
+
   private tryEat(c: Creature, i: number, dt: number): void {
     if (c.energy >= c.maxEnergy * 0.98) return;
     const g = c.genome.genes;
-    const reach = 1.3 + g.size * 0.3;
-    const b = c.targets.bush;
-    if (b && b.fruit >= 1 && (b.x + 0.5 - c.x) ** 2 + (b.z + 0.5 - c.z) ** 2 <= reach * reach) {
-      c.eating = true;
-      // ~1 fruta a cada 0,7 s
-      if (this.rng.next() < dt * 1.4) {
-        b.fruit--;
-        c.energy = Math.min(c.maxEnergy, c.energy + FRUIT_ENERGY * c.cfg.fruitEff);
-        c.hydration = Math.min(1, c.hydration + 0.06); // fruta tem água
-      }
-      return;
-    }
+    if (this.eatFruit(c, dt)) return;
     // mordida ∝ massa (bicho grande come mais por bocada), digestão ∝ √metabolismo
     const bite = 0.5 * c.mass * Math.sqrt(g.metabolism) * dt;
     // come o que render mais nesta célula: grama ou folhas de árvore
@@ -540,6 +669,82 @@ export class Simulation {
       c.energy = Math.min(c.maxEnergy, c.energy + energy);
       c.hydration = Math.min(1, c.hydration + got * 0.03); // folhas também hidratam um pouco
     }
+  }
+
+  /**
+   * Predador quer "comer": se há carcaça ao alcance, come; senão, ataca a presa ao alcance.
+   * Chance de o ataque dar certo:
+   *   base × √(massa do predador / massa da presa)   (presa grande se defende)
+   *   + 15% por companheiro de alcateia atacando junto (caça em grupo, até 3)
+   *   + 40% se a presa está dormindo
+   */
+  private tryHunt(c: Creature, dt: number): void {
+    const t = c.targets;
+    const reach = 1.2 + c.genome.genes.size * 0.5;
+    const k = t.carcass;
+    if (k && k.meat > 0 && (k.x - c.x) ** 2 + (k.z - c.z) ** 2 <= reach * reach) {
+      if (c.energy >= c.maxEnergy * 0.98) return;
+      // mordida de carne ∝ massa, digestão ∝ √metabolismo
+      const want = Math.min(k.meat, 25 * c.mass * Math.sqrt(c.genome.genes.metabolism) * dt, c.maxEnergy - c.energy);
+      k.meat -= want;
+      c.energy += want;
+      c.hydration = Math.min(1, c.hydration + want * 0.0005); // carne tem água
+      c.eating = true;
+      return;
+    }
+    const p = t.prey;
+    const r = p ? reach + p.genome.genes.size * 0.4 : 0;
+    if (!p || !p.alive || c.attackCd > 0 || (p.x - c.x) ** 2 + (p.z - c.z) ** 2 > r * r) {
+      // onívoro (raposa): sem presa ao alcance, come frutas
+      // (só com fome de verdade: fruta é o "plano B", não a dieta principal)
+      if (c.cfg.fruitEff > 0 && c.energy < c.maxEnergy * 0.5) this.eatFruit(c, dt);
+      return;
+    }
+    c.attacking = true;
+    c.attackCd = ATTACK_COOLDOWN;
+    c.energy -= c.maxEnergy * 0.01; // o bote cansa
+    let pack = 0;
+    this.forNear(c.x, c.z, 5, (o) => {
+      if (o !== c && o.species === c.species && o.alive && !o.sleeping && o.output[2] > 0 &&
+          (o.x - c.x) ** 2 + (o.z - c.z) ** 2 <= 25) pack++;
+    });
+    let chance = ATTACK_BASE * Math.sqrt(c.mass / p.mass) + PACK_BONUS * Math.min(3, pack);
+    if (p.sleeping) chance += 0.4;
+    if (this.rng.next() >= Math.min(0.95, chance)) return;
+    // pegou: a presa morre e vira carcaça (que a alcateia pode dividir)
+    this.kill(p, 'predação');
+    this.kills[c.species]++;
+    this.carcasses.push({
+      id: this.nextCarcassId++, x: p.x, z: p.z, y: p.y, species: p.species,
+      meat: p.mass * MEAT_PER_MASS, max: p.mass * MEAT_PER_MASS,
+    });
+  }
+
+  /**
+   * Amamentação: na primeira metade da infância, o filhote a menos de 8 blocos da mãe
+   * recebe até 0,5% da energia máxima DELA por segundo, até ficar com 35% (filhote é pequeno).
+   * A mãe paga, e para de amamentar se cair abaixo de 30% (senão a ninhada a mata de fome). Sem isso, filhotes de predador, que ainda não sabem caçar, morrem de fome.
+   */
+  /** vira o filhote na direção da mãe se ela estiver a mais de 3 blocos; true se virou */
+  private followMother(c: Creature, dt: number): boolean {
+    const m = this.byId.get(c.mother);
+    if (!m || !m.alive) return false;
+    const dx = m.x - c.x, dz = m.z - c.z;
+    if (dx * dx + dz * dz < 9) return false;
+    const diff = Math.atan2(Math.sin(Math.atan2(dz, dx) - c.yaw), Math.cos(Math.atan2(dz, dx) - c.yaw));
+    c.yaw += clamp(diff, -TURN_RATE * dt, TURN_RATE * dt);
+    return true;
+  }
+
+  private nurse(c: Creature, dt: number): void {
+    const m = this.byId.get(c.mother);
+    if (!m || !m.alive || m.energy < m.maxEnergy * 0.3) return;
+    if ((m.x - c.x) ** 2 + (m.z - c.z) ** 2 > 64) return;
+    const give = Math.min(c.maxEnergy * 0.35 - c.energy, m.maxEnergy * 0.005 * dt);
+    if (give <= 0) return;
+    m.energy -= give;
+    c.energy += give * 0.9; // 10% se perde na conversão
+    c.nursing = true;
   }
 
   private tryDrink(c: Creature, i: number, dt: number): void {
@@ -573,7 +778,7 @@ export class Simulation {
 
   private ready(c: Creature): boolean {
     return c.alive && !c.sleeping && !c.pregnant && c.cooldown <= 0 && c.age >= c.maturity &&
-      c.energy >= c.maxEnergy * 0.4 && c.hydration >= 0.3;
+      c.energy >= c.maxEnergy * c.cfg.readyEnergy && c.hydration >= 0.3;
   }
 
   /** Reprodução sexuada: fêmea pronta encontra um macho pronto colado nela. */
@@ -598,9 +803,9 @@ export class Simulation {
     mother.pregnant = null;
     const g = mother.genome.genes;
     const n = clamp(Math.round(g.litter + this.rng.gauss() * 0.4), 1, 8);
-    // a mãe investe 50% da energia, dividida entre os filhotes:
+    // a mãe investe parte da energia (50% herbívoros, 30% predadores), dividida entre os filhotes:
     // ninhada grande = muitos filhotes fracos; pequena = poucos fortes
-    const invest = mother.energy * 0.5;
+    const invest = mother.energy * mother.cfg.invest;
     mother.energy -= invest;
     const father = this.byId.get(p.fatherId);
     for (let k = 0; k < n; k++) {
@@ -700,19 +905,30 @@ export class Simulation {
     return n;
   }
 
+  /** avisa na linha do tempo quando uma espécie some (ou volta) */
+  private checkExtinctions(): void {
+    for (const cfg of SPECIES) {
+      const n = this.count(cfg.id);
+      if (n === 0 && !this.extinct[cfg.id]) {
+        this.extinct[cfg.id] = true;
+        this.events.push({ t: this.time, text: `Extinção: ${cfg.plural.toLowerCase()} desapareceram` });
+      } else if (n > 0 && this.extinct[cfg.id]) this.extinct[cfg.id] = false;
+    }
+  }
+
   private recordStats(): void {
     const pop = new Array(SPECIES_COUNT).fill(0);
-    const sums = Array.from({ length: SPECIES_COUNT }, () => ({ speed: 0, size: 0, vision: 0, fur: 0, metabolism: 0, litter: 0 }));
+    const sums = Array.from({ length: SPECIES_COUNT }, () => ({ speed: 0, size: 0, vision: 0, fur: 0, metabolism: 0, litter: 0, camo: 0 }));
     const maxGen = new Array(SPECIES_COUNT).fill(0);
     for (const c of this.creatures) {
       pop[c.species]++;
       const s = sums[c.species], g = c.genome.genes;
-      s.speed += g.speed; s.size += g.size; s.vision += g.vision; s.fur += g.fur; s.metabolism += g.metabolism; s.litter += g.litter;
+      s.speed += g.speed; s.size += g.size; s.vision += g.vision; s.fur += g.fur; s.metabolism += g.metabolism; s.litter += g.litter; s.camo += c.camo;
       maxGen[c.species] = Math.max(maxGen[c.species], c.generation);
     }
     const genes = sums.map((s, k) => {
       const n = Math.max(1, pop[k]);
-      return { speed: s.speed / n, size: s.size / n, vision: s.vision / n, fur: s.fur / n, metabolism: s.metabolism / n, litter: s.litter / n };
+      return { speed: s.speed / n, size: s.size / n, vision: s.vision / n, fur: s.fur / n, metabolism: s.metabolism / n, litter: s.litter / n, camo: s.camo / n };
     });
     this.stats.push({
       t: this.time, pop, bushes: this.plants.bushes.length,

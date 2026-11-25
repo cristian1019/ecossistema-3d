@@ -16,7 +16,7 @@ import { ChunkRenderer } from './render/chunkRenderer';
 import { DayNight } from './render/sky';
 import { CameraRig } from './render/cameraRig';
 import { AdaptiveResolution } from './render/adaptiveResolution';
-import { CreatureRenderer } from './render/creatureRenderer';
+import { CreatureRenderer, HEAD_HEIGHT } from './render/creatureRenderer';
 import { PlantRenderer } from './render/plantRenderer';
 import { Hud } from './ui/hud';
 import { PopulationChart } from './ui/charts';
@@ -223,6 +223,7 @@ function onSim(msg: FromSim): void {
     }
     case 'plants':
       plants.set(msg.bushes);
+      plants.setCarcasses(msg.carcasses);
       if (msg.grass) chunks.setGrass(msg.grass);
       break;
     case 'detail':
@@ -277,7 +278,7 @@ function loop(): void {
   if (eyes && creatures.trackedVisible) {
     // olhos do bicho: câmera na cabeça, olhando para onde ele anda
     const t = creatures.tracked;
-    const headY = t.species === 0 ? 0.75 : 1.85;
+    const headY = HEAD_HEIGHT[t.species] ?? 1;
     camera.position.set(t.x + Math.cos(t.yaw) * 0.45 * t.scale, t.y + headY * t.scale, t.z + Math.sin(t.yaw) * 0.45 * t.scale);
     camera.lookAt(camera.position.x + Math.cos(t.yaw), camera.position.y - 0.08, camera.position.z + Math.sin(t.yaw));
   } else {

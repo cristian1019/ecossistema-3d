@@ -4,7 +4,6 @@
  *  - linha verde reforça, laranja inibe; mais grossa = peso mais forte;
  *  - as bolinhas acendem (verde positivo, laranja negativo) conforme o bicho pensa.
  */
-import { INPUT_LABELS, OUTPUT_LABELS } from '../sim/species';
 
 const POS = '#5fb03a';
 const NEG = '#e0663d';
@@ -19,8 +18,9 @@ export function drawBrain(
   svg: SVGSVGElement,
   w1: Float32Array, w2: Float32Array,
   input: Float32Array | null, hidden: Float32Array | null, output: Float32Array | null,
+  inLabels: string[], outLabels: string[],
 ): void {
-  const NI = INPUT_LABELS.length, NH = w1.length / NI, NO = OUTPUT_LABELS.length;
+  const NI = inLabels.length, NH = w1.length / NI, NO = outLabels.length;
   const W = 330, H = Math.max(NI, NH, NO) * 15 + 20;
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.style.height = `${H}px`;
@@ -41,12 +41,12 @@ export function drawBrain(
     `<circle cx="${x}" cy="${y.toFixed(1)}" r="${r}" fill="${fill(v)}" stroke="currentColor" stroke-opacity=".45" stroke-width="1.2"/>`;
   for (let i = 0; i < NI; i++) {
     out += node(xs[0], yi[i], input ? input[i] : null, 5);
-    out += `<text x="${xs[0] - 9}" y="${(yi[i] + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="currentColor" opacity=".85">${INPUT_LABELS[i]}</text>`;
+    out += `<text x="${xs[0] - 9}" y="${(yi[i] + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="currentColor" opacity=".85">${inLabels[i]}</text>`;
   }
   for (let j = 0; j < NH; j++) out += node(xs[1], yh[j], hidden ? hidden[j] : null, 6.5);
   for (let k = 0; k < NO; k++) {
     out += node(xs[2], yo[k], output ? output[k] : null, 8);
-    out += `<text x="${xs[2] + 13}" y="${(yo[k] + 3.5).toFixed(1)}" font-size="11" font-weight="600" fill="currentColor">${OUTPUT_LABELS[k]}</text>`;
+    out += `<text x="${xs[2] + 13}" y="${(yo[k] + 3.5).toFixed(1)}" font-size="11" font-weight="600" fill="currentColor">${outLabels[k]}</text>`;
   }
   svg.innerHTML = out;
 }

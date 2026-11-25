@@ -5,6 +5,8 @@
  * espécies de reprodução lenta (cervos) não têm tempo de evoluir. Então,
  * opcionalmente, a geração inicial nasce de um "ancestral primitivo": algumas
  * ligações simples escritas à mão + ruído aleatório em todos os pesos.
+ * Para predadores, as mesmas ligações viram "presa de um lado → vire" e
+ * "com fome e presa perto → atacar" (a entrada "comida" de um predador é a presa).
  *
  * Isso NÃO é treinar a rede. Depois da primeira geração tudo é seleção natural:
  * os pesos mudam por crossover e mutação, e as ligações podem ser apagadas,
@@ -22,7 +24,7 @@ const I = {
 // índices das saídas (OUTPUT_LABELS)
 const O = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5 };
 
-export function instinctBrain(shape: BrainShape, rng: Rng): Brain {
+export function instinctBrain(shape: BrainShape, rng: Rng, diet: 'plants' | 'meat' = 'plants'): Brain {
   // ruído pequeno em todos os pesos: cada indivíduo é um pouco diferente
   const b = randomBrain(shape, rng, 0.3);
   const NI = shape.inputs, NH = shape.hidden;
@@ -42,12 +44,23 @@ export function instinctBrain(shape: BrainShape, rng: Rng): Brain {
   // neurônio 5: parceiro de um lado → vira
   w1(5, I.mateSide, 1.5); w2(O.turn, 5, 1.0);
   // neurônio 6: parceiro perto e sem fome → acasalar
-  w1(6, I.mateNear, 2); w1(6, I.hunger, -1.5); w1(6, I.bias, 0.3); w2(O.mate, 6, 2);
+  // (predadores vivem com ~50% de energia entre caçadas: a fome pesa bem menos para eles)
+  w1(6, I.mateNear, 2); w1(6, I.hunger, diet === 'meat' ? -0.4 : -1.5); w1(6, I.bias, 0.3); w2(O.mate, 6, 2);
   // neurônio 7: caminho bloqueado → vira e desacelera
   w1(7, I.blocked, 2); w2(O.turn, 7, 1.5); w2(O.speed, 7, -0.8);
   // neurônio 8: bando de um lado → vira um pouco para ele (andar em grupo)
   w1(8, I.groupSide, 1.5); w1(8, I.groupNear, -0.8); w2(O.turn, 8, 0.6);
-  // neurônio 9 fica livre (só ruído) para a evolução usar
+  // neurônio 9: predador de um lado → vira para o lado OPOSTO
+  w1(9, I.predSide, 2); w2(O.turn, 9, -2.2);
+  // neurônio 10: predador perto → corre e acorda (para predadores esta entrada
+  // é a "ameaça", que começa sempre em zero, então o neurônio fica quieto)
+  // (sem viés: com a entrada em zero, tanh(0) = 0 e o neurônio não interfere em nada)
+  w1(10, I.predNear, 3); w2(O.speed, 10, 2.5); w2(O.sleep, 10, -2.5); w2(O.eat, 10, -1.5);
+  if (diet === 'meat') {
+    // neurônio 11 (só predadores): presa perto e com fome → PERSEGUIR (correr)
+    w1(11, I.foodNear, 2.5); w1(11, I.hunger, 1); w1(11, I.bias, -0.8); w2(O.speed, 11, 3);
+  }
+  // (nos herbívoros o neurônio 11 fica livre, só ruído, para a evolução usar)
 
   // vieses das saídas: anda em velocidade média, evita dormir à toa
   w2(O.speed, NH, 0.3);

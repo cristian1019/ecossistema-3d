@@ -4,7 +4,7 @@
  * para cada criatura saber em O(1) para que lado fica a água.
  */
 import { Biome } from '../world/biomes';
-import { Block } from '../world/blocks';
+import { Block, faceColor } from '../world/blocks';
 import type { GeneratedWorld } from '../world/worldgen';
 
 export interface WorldMaps {
@@ -42,12 +42,31 @@ export class SimWorld {
   readonly nearestWater: Int32Array;
   /** quão boa a célula é para grama crescer (0 = nada cresce) */
   readonly fertility: Float32Array;
+  /** cor do chão de cada célula (r, g, b em 0..1): é contra ela que a camuflagem funciona */
+  readonly ground: Float32Array;
 
   constructor(readonly maps: WorldMaps) {
     this.sx = maps.sizeX;
     this.sz = maps.sizeZ;
     this.nearestWater = this.computeNearestWater();
     this.fertility = this.computeFertility();
+    this.ground = new Float32Array(this.sx * this.sz * 3);
+    for (let i = 0; i < this.sx * this.sz; i++) {
+      const rgb = faceColor(this.isWater(i) ? Block.WATER : maps.topBlock[i], 0);
+      this.ground[i * 3] = rgb[0] / 255;
+      this.ground[i * 3 + 1] = rgb[1] / 255;
+      this.ground[i * 3 + 2] = rgb[2] / 255;
+    }
+  }
+
+  /**
+   * Camuflagem (0..1) de uma cor contra o chão da célula i:
+   * 1 = idêntica ao chão, 0 = diferença de cor ≥ 0,5 (distância RGB).
+   */
+  camo(r: number, g: number, b: number, i: number): number {
+    const dr = r - this.ground[i * 3], dg = g - this.ground[i * 3 + 1], db = b - this.ground[i * 3 + 2];
+    const d = Math.sqrt(dr * dr + dg * dg + db * db);
+    return d >= 0.5 ? 0 : 1 - d / 0.5;
   }
 
   idx(x: number, z: number): number {

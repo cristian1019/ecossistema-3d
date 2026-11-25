@@ -9,8 +9,10 @@ import { DAY_LENGTH } from './clock';
 export const enum Species {
   RABBIT = 0,
   DEER = 1,
+  WOLF = 2,
+  FOX = 3,
 }
-export const SPECIES_COUNT = 2;
+export const SPECIES_COUNT = 4;
 
 export interface SpeciesConfig {
   id: Species;
@@ -18,6 +20,16 @@ export interface SpeciesConfig {
   plural: string;
   /** cor usada nos gráficos */
   chart: string;
+  /** o que come: plantas (herbívoro) ou carne (predador) */
+  diet: 'plants' | 'meat';
+  /** espécies que caça (só predadores) */
+  prey: Species[];
+  /** multiplicador do metabolismo basal (carnívoros passam muito tempo parados entre refeições) */
+  basal: number;
+  /** fração da energia da mãe que vai para a ninhada no parto */
+  invest: number;
+  /** energia mínima (fração) para estar pronto para acasalar */
+  readyEnergy: number;
   /** "massa" relativa: escala energia, custo e mordida (coelho = 1) */
   mass: number;
   /** genes médios da população inicial */
@@ -47,6 +59,11 @@ export const SPECIES: SpeciesConfig[] = [
     name: 'Coelho',
     plural: 'Coelhos',
     chart: '#d9a066',
+    diet: 'plants',
+    basal: 1,
+    invest: 0.5,
+    readyEnergy: 0.4,
+    prey: [],
     mass: 1,
     genes: {
       size: 1, speed: 5, vision: 14, metabolism: 1.1, fur: 0.35,
@@ -67,6 +84,11 @@ export const SPECIES: SpeciesConfig[] = [
     name: 'Cervo',
     plural: 'Cervos',
     chart: '#8f5a34',
+    diet: 'plants',
+    basal: 1,
+    invest: 0.5,
+    readyEnergy: 0.4,
+    prey: [],
     mass: 6,
     genes: {
       size: 1, speed: 6, vision: 20, metabolism: 0.9, fur: 0.45,
@@ -82,10 +104,61 @@ export const SPECIES: SpeciesConfig[] = [
     groupSize: 15,
     homes: [Biome.FOREST],
   },
+  {
+    id: Species.WOLF,
+    name: 'Lobo',
+    plural: 'Lobos',
+    chart: '#9aa3ad',
+    diet: 'meat',
+    basal: 0.3,
+    // predador investe menos no parto e amamenta depois (filhote não caça)
+    invest: 0.3,
+    readyEnergy: 0.3,
+    // caça cervos (grandes: precisa da alcateia) e coelhos
+    prey: [Species.DEER, Species.RABBIT],
+    mass: 4,
+    genes: {
+      size: 1, speed: 7, vision: 28, metabolism: 1, fur: 0.55,
+      maxAge: 10 * DAY_LENGTH, litter: 3, r: 0.56, g: 0.56, b: 0.58,
+    },
+    gestation: 90,
+    maxStep: 2,
+    grassEff: 0, grazeMin: 1, fruitEff: 0, browseEff: 0,
+    initialCount: 18,
+    groupSize: 6, // alcateias
+    homes: [Biome.FOREST, Biome.PLAINS],
+  },
+  {
+    id: Species.FOX,
+    name: 'Raposa',
+    plural: 'Raposas',
+    chart: '#e07a2e',
+    diet: 'meat',
+    basal: 0.3,
+    // predador investe menos no parto e amamenta depois (filhote não caça)
+    invest: 0.3,
+    readyEnergy: 0.3,
+    prey: [Species.RABBIT],
+    mass: 1.5,
+    genes: {
+      size: 1, speed: 7.5, vision: 24, metabolism: 1.1, fur: 0.4,
+      maxAge: 7 * DAY_LENGTH, litter: 3, r: 0.85, g: 0.45, b: 0.18,
+    },
+    gestation: 70,
+    maxStep: 1,
+    // onívora: caça coelhos, mas come frutas quando falta presa (isso estabiliza a população)
+    grassEff: 0, grazeMin: 1, fruitEff: 0.5, browseEff: 0,
+    initialCount: 20,
+    groupSize: 3, // casal + 1
+    homes: [Biome.PLAINS, Biome.FOREST],
+  },
 ];
 
+/** espécies que caçam a espécie s */
+export const PREDATORS_OF: Species[][] = SPECIES.map((s) => SPECIES.filter((p) => p.prey.includes(s.id)).map((p) => p.id));
+
 /**
- * Entradas do cérebro (iguais para todos os herbívoros).
+ * Entradas do cérebro (as mesmas para todas as espécies).
  * Direções são relativas à cabeça do bicho: seno (lado) e cosseno (frente/trás).
  */
 export const INPUT_LABELS = [
@@ -98,4 +171,15 @@ export const INPUT_LABELS = [
   'subida à frente', 'bloqueado à frente', 'constante',
 ];
 export const OUTPUT_LABELS = ['virar', 'acelerar', 'comer', 'beber', 'dormir', 'acasalar'];
-export const HERBIVORE_BRAIN = { inputs: INPUT_LABELS.length, hidden: 10, outputs: OUTPUT_LABELS.length };
+/** mesmo cérebro para todas as espécies: 23 → 12 → 6 */
+export const BRAIN_SHAPE = { inputs: INPUT_LABELS.length, hidden: 12, outputs: OUTPUT_LABELS.length };
+
+/** para predadores, "comida" é a presa e "comer" é atacar/comer carne */
+export function inputLabels(species: Species): string[] {
+  if (SPECIES[species].diet === 'plants') return INPUT_LABELS;
+  return INPUT_LABELS.map((l) => l.replace('comida', 'presa').replace('predador', 'ameaça'));
+}
+export function outputLabels(species: Species): string[] {
+  if (SPECIES[species].diet === 'plants') return OUTPUT_LABELS;
+  return OUTPUT_LABELS.map((l) => (l === 'comer' ? 'atacar' : l));
+}

@@ -5,59 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../src/core/rng';
-import { randomBrain, type Brain } from '../src/sim/neural';
-import { Simulation, DT, type Creature } from '../src/sim/simulation';
-import { HERBIVORE_BRAIN, SPECIES, Species } from '../src/sim/species';
-import type { WorldMaps } from '../src/sim/simWorld';
-import { Biome } from '../src/world/biomes';
-import { Block } from '../src/world/blocks';
-
-const S = 64;
-
-function makeMaps(): WorldMaps {
-  const N = S * S;
-  const height = new Uint8Array(N).fill(10);
-  const waterTop = new Uint8Array(N);
-  // lago 6×6 no canto (x, z de 2 a 7)
-  for (let z = 2; z < 8; z++) for (let x = 2; x < 8; x++) { height[x + z * S] = 8; waterTop[x + z * S] = 10; }
-  return {
-    sizeX: S, sizeZ: S, seaLevel: 5, height, waterTop,
-    biome: new Uint8Array(N).fill(Biome.PLAINS),
-    temperature: new Float32Array(N).fill(0.6), // ~17 °C de dia
-    humidity: new Float32Array(N).fill(0.6),
-    topBlock: new Uint8Array(N).fill(Block.GRASS),
-    trees: [{ x: 50, z: 50 }],
-  };
-}
-
-const OUT = { turn: 0, speed: 1, eat: 2, drink: 3, sleep: 4, mate: 5 };
-
-/** cérebro sem pesos, só com os vieses das saídas: comportamento fixo */
-function fixedBrain(bias: Partial<Record<keyof typeof OUT, number>>): Brain {
-  const b = randomBrain(HERBIVORE_BRAIN, createRng(1));
-  b.w1.fill(0);
-  b.w2.fill(0);
-  const NH = HERBIVORE_BRAIN.hidden;
-  const all = { turn: 0, speed: -5, eat: -5, drink: -5, sleep: -5, mate: -5, ...bias };
-  for (const [k, v] of Object.entries(all)) b.w2[OUT[k as keyof typeof OUT] * (NH + 1) + NH] = v;
-  return b;
-}
-
-function newSim(): Simulation {
-  const sim = new Simulation(makeMaps(), 42, { initialScale: 0, initialBushes: 0, repopulate: false });
-  sim.plants.growthMul = 0; // a grama não rebrota durante os testes (contas mais claras)
-  return sim;
-}
-
-function add(sim: Simulation, species: Species, brain: Brain, x: number, z: number, extra: Partial<Creature> = {}): Creature {
-  const genome = { genes: { ...SPECIES[species].genes }, brain };
-  const c = sim.addCreature(species, genome, x, z)!;
-  c.age = c.maturity + 10; // adulto
-  Object.assign(c, extra);
-  return c;
-}
-
-const steps = (sim: Simulation, n: number) => { for (let i = 0; i < n; i++) sim.step(); };
+import { DT } from '../src/sim/simulation';
+import { SPECIES, Species } from '../src/sim/species';
+import { S, add, fixedBrain, makeMaps, newSim, steps } from './helpers';
+import { Simulation } from '../src/sim/simulation';
 
 describe('cadeia alimentar', () => {
   it('coelho parado comendo: ganha energia e a grama do lugar diminui', () => {

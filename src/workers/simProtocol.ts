@@ -15,11 +15,13 @@ export const SNAP = {
 
 /** bits do campo FLAGS */
 export const FLAG = {
-  SLEEP: 1, EAT: 2, DRINK: 4, PREGNANT: 8, MALE: 16, YOUNG: 32,
+  SLEEP: 1, EAT: 2, DRINK: 4, PREGNANT: 8, MALE: 16, YOUNG: 32, ATTACK: 64, NURSE: 128,
 } as const;
 
 /** layout de cada arbusto: x, y, z, crescimento, frutas */
 export const BUSH_STRIDE = 5;
+/** layout de cada carcaça: x, y, z, fração de carne que sobra, espécie */
+export const CARCASS_STRIDE = 5;
 
 export interface SimSettings {
   repopulate: boolean;
@@ -55,6 +57,8 @@ export interface CreatureDetail {
   fatigue: number;
   coldStress: number;
   temp: number;
+  /** camuflagem no lugar onde está (0..1) */
+  camo: number;
   action: string;
   pregnantLeft: number | null;
   input: Float32Array;
@@ -76,5 +80,5 @@ export type FromSim =
       stats: StatsSample[];
       events: { t: number; text: string }[];
     }
-  | { type: 'plants'; bushes: Float32Array; grass: Uint8Array | null }
+  | { type: 'plants'; bushes: Float32Array; grass: Uint8Array | null; carcasses: Float32Array }
   | { type: 'detail'; detail: CreatureDetail | null };

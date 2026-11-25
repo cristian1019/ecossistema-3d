@@ -14,7 +14,7 @@
 import { generateWorld } from '../world/worldgen';
 import { mapsFromWorld, type WorldMaps } from '../sim/simWorld';
 import { DT, Simulation, type Creature } from '../sim/simulation';
-import { FLAG, SNAP, BUSH_STRIDE, type CreatureDetail, type FromSim, type SimSettings, type ToSim } from './simProtocol';
+import { FLAG, SNAP, BUSH_STRIDE, CARCASS_STRIDE, type CreatureDetail, type FromSim, type SimSettings, type ToSim } from './simProtocol';
 
 let sim: Simulation | null = null;
 let maps: WorldMaps | null = null;
@@ -126,7 +126,8 @@ function sendFrame(): void {
     buf[o + SNAP.SCALE] = g.size * (0.55 + 0.45 * grow);
     buf[o + SNAP.COLOR] = (Math.round(g.r * 255) << 16) | (Math.round(g.g * 255) << 8) | Math.round(g.b * 255);
     buf[o + SNAP.FLAGS] = (c.sleeping ? FLAG.SLEEP : 0) | (c.eating ? FLAG.EAT : 0) | (c.drinking ? FLAG.DRINK : 0) |
-      (c.pregnant ? FLAG.PREGNANT : 0) | (c.sex === 1 ? FLAG.MALE : 0) | (grow < 1 ? FLAG.YOUNG : 0);
+      (c.pregnant ? FLAG.PREGNANT : 0) | (c.sex === 1 ? FLAG.MALE : 0) | (grow < 1 ? FLAG.YOUNG : 0) |
+      (c.attacking ? FLAG.ATTACK : 0) | (c.nursing ? FLAG.NURSE : 0);
     buf[o + SNAP.SPEED] = c.v;
     buf[o + SNAP.AGE] = c.age / g.maxAge;
   }
@@ -153,14 +154,26 @@ function sendPlants(withGrass: boolean): void {
     grass = s.plants.grassBytes();
     lastGrass = performance.now();
   }
-  post({ type: 'plants', bushes, grass }, grass ? [bushes.buffer, grass.buffer] : [bushes.buffer]);
+  const carcasses = new Float32Array(s.carcasses.length * CARCASS_STRIDE);
+  s.carcasses.forEach((k, n) => {
+    const o = n * CARCASS_STRIDE;
+    carcasses[o] = k.x; carcasses[o + 1] = k.y; carcasses[o + 2] = k.z;
+    carcasses[o + 3] = k.meat / k.max; carcasses[o + 4] = k.species;
+  });
+  const transfer: Transferable[] = [bushes.buffer, carcasses.buffer];
+  if (grass) transfer.push(grass.buffer);
+  post({ type: 'plants', bushes, grass, carcasses }, transfer);
 }
 
 function actionOf(c: Creature): string {
   if (!c.alive) return 'morto';
   if (c.sleeping) return 'dormindo';
+  if (c.nursing) return 'mamando';
+  if (c.attacking) return 'atacando!';
   if (c.drinking) return 'bebendo';
-  if (c.eating) return 'comendo';
+  if (c.eating) return c.cfg.diet === 'meat' && c.targets.carcass ? 'comendo carne' : 'comendo';
+  if (c.targets.pred && c.targets.pred.alive && c.v > 3) return 'fugindo';
+  if (c.cfg.diet === 'meat' && c.targets.prey && c.output[2] > 0 && c.v > 3) return 'perseguindo uma presa';
   if (c.courting) return 'indo encontrar um parceiro';
   if (c.v > 0.5) return 'andando';
   return 'parado';
@@ -175,7 +188,7 @@ function sendDetail(): void {
     mother: c.mother, father: c.father, children: c.children, childIds: [...c.childIds],
     genes: { ...c.genome.genes },
     energy: c.energy, maxEnergy: c.maxEnergy, hydration: c.hydration, fatigue: c.fatigue,
-    coldStress: c.coldStress, temp: c.temp, action: actionOf(c),
+    coldStress: c.coldStress, temp: c.temp, camo: c.camo, action: actionOf(c),
     pregnantLeft: c.pregnant ? c.pregnant.timer : null,
     input: c.input.slice(), hidden: c.hidden.slice(), output: c.output.slice(),
     w1: c.genome.brain.w1.slice(), w2: c.genome.brain.w2.slice(),
